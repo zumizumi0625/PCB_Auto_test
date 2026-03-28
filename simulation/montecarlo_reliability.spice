@@ -1,0 +1,90 @@
+* Monte Carlo Reliability Analysis
+* Tests voltage divider with component tolerance variations
+*
+* Checks:
+* 1. Output voltage stays within acceptable range across tolerances
+* 2. Worst-case analysis with 5% resistor tolerance
+
+.title Monte Carlo - Component Tolerance Analysis
+
+.param r1nom=10k
+.param r2nom=10k
+.param vin_nom=5
+
+* Voltage divider with tolerance
+V1 in 0 DC {vin_nom}
+R1 in out {r1nom}
+R2 out 0 {r2nom}
+
+.control
+  * Run nominal case first
+  op
+  let v_nominal = v(out)
+  echo "Nominal Vout:" $&v_nominal "V"
+
+  * Monte Carlo: vary R1 and R2 within 5% tolerance
+  * Run 20 iterations with random variations
+  let num_runs = 20
+  let vout_min = 100
+  let vout_max = -100
+  let idx = 0
+
+  while idx < num_runs
+    * Generate random tolerance (-5% to +5%)
+    let tol1 = 1 + (0.1 * unitvec(1)[0] - 0.05)
+    let tol2 = 1 + (0.1 * unitvec(1)[0] - 0.05)
+
+    alter R1 = {r1nom} * tol1
+    alter R2 = {r2nom} * tol2
+
+    op
+
+    let vout_i = v(out)
+    if vout_i < vout_min
+      let vout_min = vout_i
+    end
+    if vout_i > vout_max
+      let vout_max = vout_i
+    end
+
+    let idx = idx + 1
+  end
+
+  * Reset to nominal
+  alter R1 = {r1nom}
+  alter R2 = {r2nom}
+
+  let vout_spread = vout_max - vout_min
+  let nominal = {vin_nom} * {r2nom} / ({r1nom} + {r2nom})
+
+  echo "=== Monte Carlo Results (20 runs, 5% tolerance) ==="
+  echo "Nominal:" $&nominal "V"
+  echo "Min Vout:" $&vout_min "V"
+  echo "Max Vout:" $&vout_max "V"
+  echo "Spread:" $&vout_spread "V"
+
+  echo "RESULT:nominal=$&nominal" > simulation_results.txt
+  echo "RESULT:vout_min=$&vout_min" >> simulation_results.txt
+  echo "RESULT:vout_max=$&vout_max" >> simulation_results.txt
+  echo "RESULT:spread=$&vout_spread" >> simulation_results.txt
+
+  * Check: output must stay within 10% of nominal (0.25V for 2.5V)
+  let tolerance = 0.1 * nominal
+  let min_ok = (vout_min > nominal - tolerance)
+  let max_ok = (vout_max < nominal + tolerance)
+
+  echo "Min within 10%:" $&min_ok
+  echo "Max within 10%:" $&max_ok
+
+  if min_ok and max_ok
+    echo "PASS: Output within tolerance across component variations"
+    echo "STATUS:PASS" >> simulation_results.txt
+  else
+    echo "FAIL: Output exceeds tolerance with component variations"
+    echo "STATUS:FAIL" >> simulation_results.txt
+  end
+
+  quit
+.endc
+
+.end

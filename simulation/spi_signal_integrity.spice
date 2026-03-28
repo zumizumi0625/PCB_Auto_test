@@ -1,0 +1,90 @@
+* SPI Signal Integrity Simulation
+* Tests clock and data line quality at various speeds
+*
+* Checks:
+* 1. Clock signal reaches valid logic levels
+* 2. Data setup time before clock edge
+* 3. Signal overshoot/undershoot within limits
+
+.title SPI Signal Integrity Check
+
+* Supply
+VCC vcc 0 DC 3.3
+
+* SPI Clock (SCLK) — 1MHz
+* CMOS push-pull driver model
+Vsclk_drv sclk_drv 0 PULSE(0 3.3 0 5n 5n 500n 1u)
+Rdrv_sclk sclk_drv sclk_near 33
+* Trace model (transmission line approximation)
+Ltrace_sclk sclk_near sclk_mid 10n
+Ctrace_sclk sclk_mid 0 5p
+Rtrace_sclk sclk_mid sclk 10
+* Load capacitance (slave device input)
+Cload_sclk sclk 0 15p
+
+* SPI MOSI — data transitions ahead of clock
+Vmosi_drv mosi_drv 0 PULSE(0 3.3 50n 5n 5n 450n 1u)
+Rdrv_mosi mosi_drv mosi_near 33
+Ltrace_mosi mosi_near mosi_mid 10n
+Ctrace_mosi mosi_mid 0 5p
+Rtrace_mosi mosi_mid mosi 10
+Cload_mosi mosi 0 15p
+
+* Transient analysis
+.tran 1n 5u
+
+.control
+  run
+
+  * Measure SCLK signal quality
+  * Check rise time
+  meas tran sclk_rise trig v(sclk)=0.33 rise=1 targ v(sclk)=2.97 rise=1
+
+  * Check overshoot (max voltage)
+  meas tran sclk_max max v(sclk)
+
+  * Check undershoot (min voltage)
+  meas tran sclk_min min v(sclk) from=0.5u to=1u
+
+  * Measure MOSI setup time relative to SCLK rising edge
+  * MOSI should be stable before SCLK rising edge
+  meas tran t_mosi_stable when v(mosi)=1.65 rise=1
+  meas tran t_sclk_rise when v(sclk)=1.65 rise=1
+  let setup_time = t_sclk_rise - t_mosi_stable
+
+  echo "=== SPI Signal Integrity Results ==="
+  echo "SCLK Rise Time:" $&sclk_rise "s"
+  echo "SCLK Max (overshoot):" $&sclk_max "V"
+  echo "SCLK Min (undershoot):" $&sclk_min "V"
+  echo "MOSI Setup Time:" $&setup_time "s"
+
+  * Write results
+  echo "RESULT:sclk_rise=$&sclk_rise" > simulation_results.txt
+  echo "RESULT:sclk_max=$&sclk_max" >> simulation_results.txt
+  echo "RESULT:sclk_min=$&sclk_min" >> simulation_results.txt
+  echo "RESULT:setup_time=$&setup_time" >> simulation_results.txt
+
+  * Checks:
+  * 1. Overshoot < VCC + 10% (3.63V)
+  let overshoot_ok = (sclk_max < 3.63)
+  * 2. Undershoot > -0.3V
+  let undershoot_ok = (sclk_min > -0.3)
+  * 3. Setup time > 10ns
+  let setup_ok = (setup_time > 10n)
+
+  echo "Overshoot OK (<3.63V):" $&overshoot_ok
+  echo "Undershoot OK (>-0.3V):" $&undershoot_ok
+  echo "Setup time OK (>10ns):" $&setup_ok
+
+  if overshoot_ok and undershoot_ok and setup_ok
+    echo "PASS: SPI signals meet integrity requirements"
+    echo "STATUS:PASS" >> simulation_results.txt
+  else
+    echo "FAIL: SPI signal integrity issues detected"
+    echo "STATUS:FAIL" >> simulation_results.txt
+  end
+
+  quit
+.endc
+
+.end

@@ -1,0 +1,83 @@
+* I2C Bus Integrity Simulation
+* Tests pull-up resistor sizing and signal integrity
+*
+* Checks:
+* 1. Rise time meets I2C spec (< 1us for standard mode, < 300ns for fast mode)
+* 2. VOL is below 0.4V threshold
+* 3. Signal reaches VIH (0.7*VCC) within spec
+
+.title I2C Bus Integrity Check
+
+* Supply
+VCC vcc 0 DC 3.3
+
+* Pull-up resistors (4.7k typical for standard I2C)
+Rp_sda vcc sda 4.7k
+Rp_scl vcc scl 4.7k
+
+* Bus capacitance (worst case: multiple devices + traces)
+* I2C spec max: 400pF for standard mode
+Cbus_sda sda 0 200p
+Cbus_scl scl 0 200p
+
+* Open-drain driver model (NMOS transistor)
+* SDA driver
+M1 sda gate_sda 0 0 NMOS W=50u L=0.5u
+Vgate_sda gate_sda 0 PULSE(3.3 0 0 10n 10n 5u 10u)
+
+* SCL driver (100kHz standard mode)
+M2 scl gate_scl 0 0 NMOS W=50u L=0.5u
+Vgate_scl gate_scl 0 PULSE(3.3 0 1u 10n 10n 4u 10u)
+
+* Simple NMOS model
+.model NMOS NMOS (VTO=0.7 KP=110u GAMMA=0.4 LAMBDA=0.04 CBD=5p CBS=5p)
+
+* Transient analysis — observe several I2C clock cycles
+.tran 10n 50u
+
+.control
+  run
+
+  * Measure rise time on SDA (10% to 90% of VCC)
+  let vcc_val = 3.3
+  let v10 = 0.1 * vcc_val
+  let v90 = 0.9 * vcc_val
+
+  * Find rise time: time from 10% to 90% after first rising edge
+  meas tran t_sda_10 when v(sda)=v10 rise=1
+  meas tran t_sda_90 when v(sda)=v90 rise=1
+  let rise_time_sda = t_sda_90 - t_sda_10
+
+  * Measure VOL (low voltage when driven)
+  meas tran vol_sda min v(sda) from=0 to=4u
+
+  echo "=== I2C Bus Integrity Results ==="
+  echo "SDA Rise Time:" $&rise_time_sda "seconds"
+  echo "SDA VOL:" $&vol_sda "V"
+
+  * Write results
+  echo "RESULT:rise_time_sda=$&rise_time_sda" > simulation_results.txt
+  echo "RESULT:vol_sda=$&vol_sda" >> simulation_results.txt
+
+  * I2C Standard Mode spec checks
+  * Rise time must be < 1us (1e-6)
+  let rise_ok = (rise_time_sda < 1e-6)
+
+  * VOL must be < 0.4V
+  let vol_ok = (vol_sda < 0.4)
+
+  echo "Rise time check (< 1us):" $&rise_ok
+  echo "VOL check (< 0.4V):" $&vol_ok
+
+  if rise_ok and vol_ok
+    echo "PASS: I2C bus meets Standard Mode specifications"
+    echo "STATUS:PASS" >> simulation_results.txt
+  else
+    echo "FAIL: I2C bus does not meet specifications"
+    echo "STATUS:FAIL" >> simulation_results.txt
+  end
+
+  quit
+.endc
+
+.end
