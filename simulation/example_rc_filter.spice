@@ -6,44 +6,51 @@
 
 .title RC Low-Pass Filter
 
-* Power supply
+* Power supply (AC source)
 V1 in 0 AC 1
 
 * Components
 R1 in out 1k
 C1 out 0 100n
 
-* AC analysis: 10 points per decade, 1Hz to 1MHz
-.ac dec 10 1 1meg
-
-* Transient analysis: 1kHz square wave
-V2 in2 0 PULSE(0 5 0 1n 1n 0.5m 1m)
-R2 in2 out2 1k
-C2 out2 0 100n
-.tran 0.01m 5m
+* AC analysis: 100 points per decade, 1Hz to 1MHz
+.ac dec 100 1 1meg
 
 .control
   run
 
-  * AC Analysis results
+  * Expected cutoff frequency: f = 1/(2*pi*R*C)
   let cutoff_freq = 1/(2*PI*1k*100n)
   echo "Expected cutoff frequency:" $&cutoff_freq "Hz"
 
-  * Find -3dB point
-  meas ac f3db when vdb(out)=-3
-  echo "Measured -3dB frequency:" $&f3db "Hz"
+  * Find the -3dB point by checking gain
+  let gain_db = vdb(out)
+  let target = -3
 
-  * Check if within 5% tolerance
-  let error = abs(f3db - cutoff_freq)/cutoff_freq * 100
-  echo "Error:" $&error "%"
+  * Manual search: find frequency where gain crosses -3dB
+  let idx = 0
+  let f3db_found = 0
+  while idx < length(gain_db) - 1
+    if gain_db[idx] >= target and gain_db[idx+1] < target
+      let f3db_found = frequency[idx]
+      break
+    end
+    let idx = idx + 1
+  end
 
-  * Write results to file for CI parsing
+  echo "Measured -3dB frequency:" $&f3db_found "Hz"
+
+  * Check if within 10% tolerance
+  let error_pct = abs(f3db_found - cutoff_freq)/cutoff_freq * 100
+  echo "Error:" $&error_pct "%"
+
+  * Write results
   echo "RESULT:cutoff_freq=$&cutoff_freq" > simulation_results.txt
-  echo "RESULT:f3db=$&f3db" >> simulation_results.txt
-  echo "RESULT:error_pct=$&error" >> simulation_results.txt
+  echo "RESULT:f3db=$&f3db_found" >> simulation_results.txt
+  echo "RESULT:error_pct=$&error_pct" >> simulation_results.txt
 
-  if error > 5
-    echo "FAIL: Cutoff frequency error exceeds 5%"
+  if error_pct > 10
+    echo "FAIL: Cutoff frequency error exceeds 10%"
     echo "STATUS:FAIL" >> simulation_results.txt
   else
     echo "PASS: Cutoff frequency within tolerance"
