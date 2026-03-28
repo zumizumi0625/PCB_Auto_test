@@ -1,0 +1,56 @@
+* RC Low-Pass Filter — Example SPICE Simulation
+* Tests basic circuit simulation in CI pipeline
+*
+* Circuit: Vin → R1(1k) → node(out) → C1(100nF) → GND
+* Expected: -3dB cutoff at ~1.59kHz
+
+.title RC Low-Pass Filter
+
+* Power supply
+V1 in 0 AC 1
+
+* Components
+R1 in out 1k
+C1 out 0 100n
+
+* AC analysis: 10 points per decade, 1Hz to 1MHz
+.ac dec 10 1 1meg
+
+* Transient analysis: 1kHz square wave
+V2 in2 0 PULSE(0 5 0 1n 1n 0.5m 1m)
+R2 in2 out2 1k
+C2 out2 0 100n
+.tran 0.01m 5m
+
+.control
+  run
+
+  * AC Analysis results
+  let cutoff_freq = 1/(2*PI*1k*100n)
+  echo "Expected cutoff frequency:" $&cutoff_freq "Hz"
+
+  * Find -3dB point
+  meas ac f3db when vdb(out)=-3
+  echo "Measured -3dB frequency:" $&f3db "Hz"
+
+  * Check if within 5% tolerance
+  let error = abs(f3db - cutoff_freq)/cutoff_freq * 100
+  echo "Error:" $&error "%"
+
+  * Write results to file for CI parsing
+  echo "RESULT:cutoff_freq=$&cutoff_freq" > simulation_results.txt
+  echo "RESULT:f3db=$&f3db" >> simulation_results.txt
+  echo "RESULT:error_pct=$&error" >> simulation_results.txt
+
+  if error > 5
+    echo "FAIL: Cutoff frequency error exceeds 5%"
+    echo "STATUS:FAIL" >> simulation_results.txt
+  else
+    echo "PASS: Cutoff frequency within tolerance"
+    echo "STATUS:PASS" >> simulation_results.txt
+  end
+
+  quit
+.endc
+
+.end

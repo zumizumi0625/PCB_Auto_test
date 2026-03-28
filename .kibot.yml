@@ -1,0 +1,106 @@
+kibot:
+  version: 1
+
+preflight:
+  # DRC: Design Rule Check (基板の配線ルール違反を検出)
+  run_drc: true
+  # ERC: Electrical Rules Check (回路図の電気的ルール違反を検出)
+  run_erc: true
+  # DRC/ERCでエラーがあったらCIを失敗させる
+  check_zone_fills: true
+
+outputs:
+  # ============================================
+  # Gerber ファイル生成（製造用）
+  # ============================================
+  - name: gerbers
+    comment: "Gerber fabrication files"
+    type: gerber
+    dir: output/gerbers
+    layers:
+      - copper
+      - technical
+      - Edge.Cuts
+
+  - name: drill
+    comment: "Drill files"
+    type: excellon
+    dir: output/gerbers
+
+  # ============================================
+  # BOM (部品表) 生成
+  # ============================================
+  - name: bom_html
+    comment: "Interactive HTML BOM"
+    type: ibom
+    dir: output/bom
+
+  - name: bom_csv
+    comment: "CSV BOM"
+    type: bom
+    dir: output/bom
+    options:
+      format: CSV
+      output: "bom.csv"
+
+  # ============================================
+  # 回路図・基板 PDF 出力
+  # ============================================
+  - name: schematic_pdf
+    comment: "Schematic PDF"
+    type: pdf_sch_print
+    dir: output/docs
+
+  - name: pcb_pdf
+    comment: "PCB layout PDF"
+    type: pcb_print
+    dir: output/docs
+    options:
+      pages:
+        - layers:
+            - F.Cu
+            - Edge.Cuts
+          sheet: "Front Copper"
+        - layers:
+            - B.Cu
+            - Edge.Cuts
+          sheet: "Back Copper"
+
+  # ============================================
+  # 3D レンダリング
+  # ============================================
+  - name: pcb_render_top
+    comment: "3D render (top)"
+    type: render_3d
+    dir: output/renders
+    options:
+      ray_tracing: false
+      rotate_x: 3
+      rotate_z: 3
+
+  # ============================================
+  # Pick & Place (実装用)
+  # ============================================
+  - name: position
+    comment: "Pick and place file"
+    type: position
+    dir: output/assembly
+    options:
+      format: CSV
+
+  # ============================================
+  # DRC/ERC レポート (JSON)
+  # ============================================
+  - name: drc_report
+    comment: "DRC report"
+    type: drc
+    dir: output/reports
+    options:
+      output: "drc_report.json"
+
+  - name: erc_report
+    comment: "ERC report"
+    type: erc
+    dir: output/reports
+    options:
+      output: "erc_report.json"

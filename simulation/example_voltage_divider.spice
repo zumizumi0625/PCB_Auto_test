@@ -1,0 +1,39 @@
+* Voltage Divider — Basic DC Simulation
+* Tests: Vout = Vin * R2/(R1+R2)
+*
+* Vin=5V, R1=10k, R2=10k → Vout should be 2.5V
+
+.title Voltage Divider
+
+V1 in 0 DC 5
+
+R1 in out 10k
+R2 out 0 10k
+
+.control
+  op
+
+  let vout = v(out)
+  let expected = 5 * 10k / (10k + 10k)
+  let error = abs(vout - expected)
+
+  echo "Vout:" $&vout "V"
+  echo "Expected:" $&expected "V"
+  echo "Error:" $&error "V"
+
+  echo "RESULT:vout=$&vout" > simulation_results.txt
+  echo "RESULT:expected=$&expected" >> simulation_results.txt
+  echo "RESULT:error=$&error" >> simulation_results.txt
+
+  if error > 0.01
+    echo "FAIL: Voltage divider output incorrect"
+    echo "STATUS:FAIL" >> simulation_results.txt
+  else
+    echo "PASS: Voltage divider output correct"
+    echo "STATUS:PASS" >> simulation_results.txt
+  end
+
+  quit
+.endc
+
+.end

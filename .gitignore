@@ -1,0 +1,28 @@
+# KiCad backup/autosave
+*.kicad_pcb-bak
+*.kicad_sch-bak
+*-backups/
+*~
+\#*
+_autosave-*
+*.dsn
+*.ses
+fp-info-cache
+
+# Build outputs
+output/
+gerbers/
+bom/
+
+# Simulation
+*.raw
+*.log
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# OS
+.DS_Store
+Thumbs.db
