@@ -1,86 +1,63 @@
 * Monte Carlo Reliability Analysis
-* Tests voltage divider with component tolerance variations
+* Tests voltage divider with component tolerance
 *
-* Checks:
-* 1. Output voltage stays within acceptable range across tolerances
-* 2. Worst-case analysis with 5% resistor tolerance
+* Nominal: Vout = 5 * 10k/(10k+10k) = 2.5V
+* With 5% tolerance, output should stay within 10% of nominal
 
-.title Monte Carlo - Component Tolerance Analysis
+.title Monte Carlo - Component Tolerance
 
-.param r1nom=10k
-.param r2nom=10k
-.param vin_nom=5
-
-* Voltage divider with tolerance
-V1 in 0 DC {vin_nom}
-R1 in out {r1nom}
-R2 out 0 {r2nom}
+V1 in 0 DC 5
+R1 in out 10k
+R2 out 0 10k
 
 .control
-  * Run nominal case first
+  * Nominal case
   op
-  let v_nominal = v(out)
-  echo "Nominal Vout:" $&v_nominal "V"
+  let v_nom = v(out)
+  echo "Nominal Vout:" $&v_nom "V"
 
-  * Monte Carlo: vary R1 and R2 within 5% tolerance
-  * Run 20 iterations with random variations
-  let num_runs = 20
-  let vout_min = 100
-  let vout_max = -100
-  let idx = 0
+  * Worst case: R1 max, R2 min → lowest Vout
+  alter R1 = 10.5k
+  alter R2 = 9.5k
+  op
+  let v_worst_low = v(out)
 
-  while idx < num_runs
-    * Generate random tolerance (-5% to +5%)
-    let tol1 = 1 + (0.1 * unitvec(1)[0] - 0.05)
-    let tol2 = 1 + (0.1 * unitvec(1)[0] - 0.05)
+  * Worst case: R1 min, R2 max → highest Vout
+  alter R1 = 9.5k
+  alter R2 = 10.5k
+  op
+  let v_worst_high = v(out)
 
-    alter R1 = {r1nom} * tol1
-    alter R2 = {r2nom} * tol2
+  * Reset
+  alter R1 = 10k
+  alter R2 = 10k
 
-    op
+  let spread = v_worst_high - v_worst_low
 
-    let vout_i = v(out)
-    if vout_i < vout_min
-      let vout_min = vout_i
-    end
-    if vout_i > vout_max
-      let vout_max = vout_i
-    end
+  echo "=== Tolerance Analysis (5% resistors) ==="
+  echo "Worst case low:" $&v_worst_low "V"
+  echo "Worst case high:" $&v_worst_high "V"
+  echo "Spread:" $&spread "V"
 
-    let idx = idx + 1
+  echo "RESULT:v_nominal=$&v_nom" > simulation_results.txt
+  echo "RESULT:v_worst_low=$&v_worst_low" >> simulation_results.txt
+  echo "RESULT:v_worst_high=$&v_worst_high" >> simulation_results.txt
+  echo "RESULT:spread=$&spread" >> simulation_results.txt
+
+  let pass = 1
+  * Output must stay within 10% of 2.5V (2.25V to 2.75V)
+  if v_worst_low < 2.25
+    let pass = 0
+  end
+  if v_worst_high > 2.75
+    let pass = 0
   end
 
-  * Reset to nominal
-  alter R1 = {r1nom}
-  alter R2 = {r2nom}
-
-  let vout_spread = vout_max - vout_min
-  let nominal = {vin_nom} * {r2nom} / ({r1nom} + {r2nom})
-
-  echo "=== Monte Carlo Results (20 runs, 5% tolerance) ==="
-  echo "Nominal:" $&nominal "V"
-  echo "Min Vout:" $&vout_min "V"
-  echo "Max Vout:" $&vout_max "V"
-  echo "Spread:" $&vout_spread "V"
-
-  echo "RESULT:nominal=$&nominal" > simulation_results.txt
-  echo "RESULT:vout_min=$&vout_min" >> simulation_results.txt
-  echo "RESULT:vout_max=$&vout_max" >> simulation_results.txt
-  echo "RESULT:spread=$&vout_spread" >> simulation_results.txt
-
-  * Check: output must stay within 10% of nominal (0.25V for 2.5V)
-  let tolerance = 0.1 * nominal
-  let min_ok = (vout_min > nominal - tolerance)
-  let max_ok = (vout_max < nominal + tolerance)
-
-  echo "Min within 10%:" $&min_ok
-  echo "Max within 10%:" $&max_ok
-
-  if min_ok and max_ok
+  if pass
     echo "PASS: Output within tolerance across component variations"
     echo "STATUS:PASS" >> simulation_results.txt
   else
-    echo "FAIL: Output exceeds tolerance with component variations"
+    echo "FAIL: Output exceeds tolerance"
     echo "STATUS:FAIL" >> simulation_results.txt
   end
 
