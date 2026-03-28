@@ -1,60 +1,48 @@
-* Monte Carlo Reliability Analysis
-* Tests voltage divider with component tolerance
+* Worst-Case Component Tolerance Analysis
 *
-* Nominal: Vout = 5 * 10k/(10k+10k) = 2.5V
-* With 5% tolerance, output should stay within 10% of nominal
+* Voltage divider: Vout = Vin * R2/(R1+R2)
+* With 5% tolerance, check output stays within spec
 
-.title Monte Carlo - Component Tolerance
+.title Component Tolerance Analysis
+
+* Worst case LOW: R1=max(10.5k), R2=min(9.5k)
+* Vout = 5 * 9.5k / (10.5k + 9.5k) = 2.375V
 
 V1 in 0 DC 5
-R1 in out 10k
-R2 out 0 10k
+R1 in out 10.5k
+R2 out 0 9.5k
 
 .control
-  * Nominal case
   op
-  let v_nom = v(out)
-  echo "Nominal Vout:" $&v_nom "V"
+  let vout_low = v(out)
+  echo "Worst case LOW Vout:" $&vout_low "V"
 
-  * Worst case: R1 max, R2 min → lowest Vout
-  alter R1 = 10.5k
-  alter R2 = 9.5k
-  op
-  let v_worst_low = v(out)
-
-  * Worst case: R1 min, R2 max → highest Vout
+  * Worst case HIGH: R1=min(9.5k), R2=max(10.5k)
+  * Vout = 5 * 10.5k / (9.5k + 10.5k) = 2.625V
   alter R1 = 9.5k
   alter R2 = 10.5k
   op
-  let v_worst_high = v(out)
-
-  * Reset
-  alter R1 = 10k
-  alter R2 = 10k
-
-  let spread = v_worst_high - v_worst_low
+  let vout_high = v(out)
+  echo "Worst case HIGH Vout:" $&vout_high "V"
 
   echo "=== Tolerance Analysis (5% resistors) ==="
-  echo "Worst case low:" $&v_worst_low "V"
-  echo "Worst case high:" $&v_worst_high "V"
-  echo "Spread:" $&spread "V"
+  echo "Low:" $&vout_low "V"
+  echo "High:" $&vout_high "V"
 
-  echo "RESULT:v_nominal=$&v_nom" > simulation_results.txt
-  echo "RESULT:v_worst_low=$&v_worst_low" >> simulation_results.txt
-  echo "RESULT:v_worst_high=$&v_worst_high" >> simulation_results.txt
-  echo "RESULT:spread=$&spread" >> simulation_results.txt
+  echo "RESULT:vout_low=$&vout_low" > simulation_results.txt
+  echo "RESULT:vout_high=$&vout_high" >> simulation_results.txt
 
+  * Both must be within 2.25V - 2.75V (±10% of 2.5V)
   let pass = 1
-  * Output must stay within 10% of 2.5V (2.25V to 2.75V)
-  if v_worst_low < 2.25
+  if vout_low < 2.25
     let pass = 0
   end
-  if v_worst_high > 2.75
+  if vout_high > 2.75
     let pass = 0
   end
 
   if pass
-    echo "PASS: Output within tolerance across component variations"
+    echo "PASS: Output within tolerance"
     echo "STATUS:PASS" >> simulation_results.txt
   else
     echo "FAIL: Output exceeds tolerance"
