@@ -31,10 +31,11 @@ V_timer timer_out 0 PULSE(0 3.3 0 1u 1u 100u 100m)
 * Pulse width ≈ 0.7 * R * C = 0.7 * 100k * 100nF = 7ms
 
 * Coupling capacitor (differentiator)
-C_couple timer_out coupled 100n
+* Pulse width ≈ 0.7 * R * C = 0.7 * 10k * 1uF = 7ms
+C_couple timer_out coupled 1u
 
 * Discharge path
-R_discharge coupled 0 100k
+R_discharge coupled 0 10k
 
 * NMOS pulls reset line low when coupled goes positive
 M_rst rst_raw coupled 0 0 NMOD W=200u L=0.5u
