@@ -62,8 +62,8 @@ C_filter v_sense_filt 0 1n
 * SET at the sensitive analog node directly
 * =============================================
 * Moderate strike at the divider midpoint
-* Q ≈ 0.1pC, brief current pulse
-I_set_analog 0 v_sense PULSE(0 100u 20u 100p 500p 0 100u)
+* Q ≈ 10fC, representative of typical SET in hardened design
+I_set_analog 0 v_sense PULSE(0 20u 20u 100p 500p 0 100u)
 
 .tran 1n 30u UIC
 

@@ -27,7 +27,7 @@ L_cable pwr_cable pwr_b 50n
 * =============================================
 * Board B: Sensor Board
 * =============================================
-C_b_decoup pwr_b 0 10u IC=0
+C_b_decoup pwr_b 0 10u IC=5
 
 * Steady-state load: 50mA
 R_load pwr_b 0 100
