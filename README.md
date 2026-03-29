@@ -1,174 +1,287 @@
-# PCB Auto Test — KiCad CI/CD Pipeline
+# PCB Auto Test
 
-PCB 設計の自動テスト・CI/CD パイプライン。PR や push 時に回路図・基板のルールチェック、SPICE シミュレーション、製造ファイル生成を自動実行する。
+KiCad で設計した基板を GitHub に push するだけで、回路のチェックとシミュレーションが自動で走る CI/CD パイプライン。
 
-## 機能
+## 何ができるか
 
-### 回路図・基板チェック（KiBot）
-- **DRC** (Design Rule Check) — 基板の配線ルール違反を検出
-- **ERC** (Electrical Rules Check) — 回路図の電気的ルール違反を検出
-- **BOM 生成** — 部品表を HTML/CSV で自動生成
-- **Gerber 生成** — 製造用ガーバーファイルを自動生成
-- **3D レンダリング** — 基板の 3D 画像を生成
-- **PDF 出力** — 回路図・基板レイアウトの PDF を生成
+**push / PR するだけで以下が全自動で実行される：**
 
-### SPICE シミュレーション（ngspice）
-- **バッチ実行** — `.spice` ファイルを自動でシミュレーション
-- **Pass/Fail 判定** — シミュレーション結果に対するアサーション
-- **CI 統合** — テスト失敗でビルドを止める
+1. **DRC（基板ルールチェック）** — 配線間隔、ビア径、シルク被りなどの違反を検出
+2. **ERC（電気ルールチェック）** — 未接続ピン、電源ショート、ネット名重複を検出
+3. **SPICE シミュレーション** — 回路の電気的動作を自動検証
+4. **Discord 通知** — テスト結果をチャンネルに自動投稿
+5. **製造ファイル生成** — Gerber、BOM、PDF、3D レンダー
 
-### PR レビュー支援
-- PR に DRC/ERC 結果をコメントとして自動投稿
+テストが失敗したら波形画像も自動生成されて、Artifacts からダウンロードできる。
 
-## アーキテクチャ
+---
+
+## クイックスタート（自分の基板で使う）
+
+### Step 1: ファイルをコピー
+
+自分の KiCad リポジトリに以下の 4 ファイルをコピーする：
 
 ```
-┌─────────────┐     ┌──────────────────────────┐
-│  Developer   │────▶│    GitHub Repository     │
-│  (push/PR)   │     │                          │
-└─────────────┘     └────────────┬─────────────┘
-                                 │
-                    ┌────────────▼─────────────┐
-                    │     GitHub Actions        │
-                    │                           │
-                    │  ┌─────────────────────┐  │
-                    │  │  KiBot (Docker)     │  │
-                    │  │  - DRC / ERC        │  │
-                    │  │  - Gerber / BOM     │  │
-                    │  │  - PDF / 3D Render  │  │
-                    │  └─────────────────────┘  │
-                    │                           │
-                    │  ┌─────────────────────┐  │
-                    │  │  ngspice            │  │
-                    │  │  - Circuit sim      │  │
-                    │  │  - Pass/Fail check  │  │
-                    │  └─────────────────────┘  │
-                    │                           │
-                    │  ┌─────────────────────┐  │
-                    │  │  PR Summary Bot     │  │
-                    │  │  - Comment results  │  │
-                    │  └─────────────────────┘  │
-                    └───────────────────────────┘
+自分のリポジトリ/
+├── .github/workflows/pcb-ci.yml   ← ワークフロー
+├── .kibot.yml                      ← KiBot設定
+├── simulation/run_simulations.py   ← テストランナー
+└── tools/generate_spice_tests.py   ← 自動テスト生成
 ```
+
+### Step 2: ワークフローを修正
+
+`.github/workflows/pcb-ci.yml` の `matrix.project` を自分の基板ファイルに合わせる：
+
+```yaml
+matrix:
+  project:
+    - name: my-board
+      board: hardware/my-board.kicad_pcb
+      schema: hardware/my-board.kicad_sch
+```
+
+スキーマティックの自動テスト生成のパスも合わせる：
+
+```yaml
+- name: Auto-generate SPICE tests from schematics
+  run: |
+    for sch in hardware/**/*.kicad_sch; do
+      python3 tools/generate_spice_tests.py "$sch" || true
+    done
+```
+
+### Step 3: Discord 通知を設定（任意）
+
+1. Discord チャンネル → 設定 → 連携サービス → ウェブフック → URL をコピー
+2. GitHub リポジトリ → Settings → Secrets → `DISCORD_WEBHOOK_URL` に URL を追加
+
+### Step 4: push する
+
+```bash
+git add -A && git commit -m "CI追加" && git push
+```
+
+GitHub Actions が自動で走る。結果は Actions タブと Discord で確認できる。
+
+---
+
+## 自動テスト生成
+
+KiCad のスキーマティック（`.kicad_sch`）を解析して SPICE テストを自動生成する。
+
+```bash
+python3 tools/generate_spice_tests.py my-board.kicad_sch
+# → simulation/auto_my-board.spice が生成される
+```
+
+**自動検出されるもの：**
+
+| 検出対象 | テスト内容 |
+|---------|-----------|
+| 電源ネット（`+3V3`, `+5V` 等） | 電圧値チェック |
+| 抵抗分圧回路 | 出力電圧が理論値 ±5% 以内か |
+| LED + 電流制限抵抗 | 電流が定格内か |
+| 全抵抗の合計 | 消費電力概算 |
+
+CI では push のたびに全スキーマティックからテストを自動生成してから実行する。新しい基板を追加するだけでテストが増える。
+
+---
+
+## 手書きの SPICE テスト
+
+特定の回路に対して詳細なテストを書きたい場合は、`simulation/` に `.spice` ファイルを置く。置くだけで自動的にテスト対象になる。
+
+### テストの書き方
+
+```spice
+.title My Circuit Test
+
+* --- 回路定義 ---
+V1 in 0 DC 5
+R1 in out 10k
+R2 out 0 10k
+
+.control
+  op
+
+  * 測定
+  let vout = v(out)
+  echo "Vout: $&vout V"
+
+  * 結果書き出し（テストランナーがパースする）
+  echo "RESULT:vout=$&vout" > simulation_results.txt
+
+  * Pass/Fail 判定
+  let pass = 1
+  if $&vout < 2.4
+    echo "FAIL: Vout too low"
+    let pass = 0
+  end
+  if $&vout > 2.6
+    echo "FAIL: Vout too high"
+    let pass = 0
+  end
+
+  if $&pass > 0
+    echo "STATUS:PASS" >> simulation_results.txt
+  else
+    echo "STATUS:FAIL" >> simulation_results.txt
+  end
+
+  quit
+.endc
+
+.end
+```
+
+**ルール：**
+- `.control` ブロック内で `simulation_results.txt` に `STATUS:PASS` か `STATUS:FAIL` を書く
+- `RESULT:key=value` 形式で測定値を記録するとレポートに表示される
+- 最後に必ず `quit` を入れる
+
+### 同梱テストの一覧
+
+| ファイル | 内容 | 検証項目 |
+|---------|------|---------|
+| `example_rc_filter.spice` | RC ローパスフィルタ | カットオフ周波数 |
+| `example_voltage_divider.spice` | 抵抗分圧 | DC 出力電圧 |
+| `i2c_bus_integrity.spice` | I2C バス | 立ち上がり時間、VOL、VOH |
+| `spi_signal_integrity.spice` | SPI バス | オーバーシュート、セットアップタイム |
+| `fault_overvoltage.spice` | 過電圧保護 | TVS クランプ動作 |
+| `montecarlo_reliability.spice` | 部品公差 | 50 回モンテカルロサンプリング |
+| `board_integration.spice` | 基板間接続 | ケーブル越し電圧ドロップ、I2C 品質 |
+| `radiation_set.spice` | 放射線 SET | 3 段階パルス注入での耐性 |
+| `crystal_oscillator.spice` | 水晶発振 | 発振確認、周波数精度 |
+| `periodic_reset.spice` | 定期リセット | パルス周期、パルス幅 |
+| `power_budget.spice` | 消費電力 | サブシステム別電流、バッテリ寿命 |
+
+---
+
+## Discord 通知の内容
+
+### テスト成功時
+```
+✅ PCB CI — All Passed
+`abc1234` feat: 電源回路修正
+✅ KiCad DRC/ERC: success
+✅ SPICE Simulation: success
+SPICE: 11/11 passed
+  ✅ example_rc_filter.spice
+  ✅ i2c_bus_integrity.spice
+  ...
+```
+
+### テスト失敗時
+```
+❌ PCB CI — Failures Detected
+`abc1234` fix: 抵抗値変更
+❌ SPICE Simulation: failure
+SPICE: 9/11 passed
+  ❌ i2c_bus_integrity.spice
+      rise_time_ns = 2.07e-06
+      vol = 0.014
+  ❌ montecarlo_reliability.spice
+      vout_min = 2.15
+```
+
+失敗時は波形画像も GitHub Actions の Artifacts からダウンロード可能。
+
+---
+
+## ローカルでの実行
+
+### ngspice（SPICE シミュレーション）
+
+```bash
+# インストール
+sudo apt install ngspice       # Ubuntu/Debian
+sudo pacman -S ngspice         # Arch
+brew install ngspice           # macOS
+
+# テスト実行
+python3 simulation/run_simulations.py
+```
+
+### KiBot（DRC/ERC）
+
+```bash
+# Docker で実行（推奨）
+docker run --rm -v $(pwd):/workdir ghcr.io/inti-cmnb/kicad_auto_test:latest \
+  kibot -c .kibot.yml \
+  -b hardware/example/batteryPack.kicad_pcb \
+  -e hardware/example/batteryPack.kicad_sch
+
+# pip で直接インストール
+pip install kibot
+kibot -c .kibot.yml -b my-board.kicad_pcb -e my-board.kicad_sch
+```
+
+---
 
 ## ディレクトリ構成
 
 ```
 PCB_Auto_test/
 ├── .github/workflows/
-│   └── pcb-ci.yml          # GitHub Actions ワークフロー
-├── .kibot.yml               # KiBot 設定（DRC/ERC/出力定義）
+│   └── pcb-ci.yml              # CI ワークフロー
+├── .kibot.yml                   # KiBot 設定
 ├── hardware/
-│   └── example/             # テスト用 KiCad プロジェクト
-│       ├── batteryPack.*    # バッテリーパック基板
-│       └── kibom-test-marked.*  # BOM テスト基板
+│   └── example/                 # テスト用 KiCad データ
 ├── simulation/
-│   ├── run_simulations.py   # シミュレーションテストランナー
-│   ├── example_rc_filter.spice       # RC フィルタテスト
-│   └── example_voltage_divider.spice # 分圧回路テスト
+│   ├── run_simulations.py       # テストランナー
+│   ├── example_*.spice          # 基本テスト
+│   ├── i2c_bus_integrity.spice  # I2C テスト
+│   ├── spi_signal_integrity.spice
+│   ├── fault_overvoltage.spice  # 過電圧保護
+│   ├── radiation_set.spice      # 放射線耐性
+│   ├── crystal_oscillator.spice # 水晶発振
+│   ├── periodic_reset.spice     # ウォッチドッグ
+│   ├── board_integration.spice  # 基板間接続
+│   ├── power_budget.spice       # 消費電力
+│   ├── montecarlo_reliability.spice  # モンテカルロ
+│   └── auto_*.spice             # 自動生成テスト
+├── tools/
+│   └── generate_spice_tests.py  # ネットリスト→SPICE 変換
 └── docs/
 ```
 
-## セットアップ
+---
 
-### 自分のプロジェクトで使う場合
+## CI パイプラインの全体像
 
-1. このリポジトリの以下のファイルを自分のリポジトリにコピー:
-   - `.github/workflows/pcb-ci.yml`
-   - `.kibot.yml`
-   - `simulation/run_simulations.py`
-
-2. `.kibot.yml` のパスを自分のプロジェクト構成に合わせて修正
-
-3. GitHub Actions のワークフローで `matrix.project` を自分の基板に合わせて修正:
-   ```yaml
-   matrix:
-     project:
-       - name: my-board
-         board: hardware/my-board.kicad_pcb
-         schema: hardware/my-board.kicad_sch
-   ```
-
-4. SPICE テストを追加する場合は `simulation/` に `.spice` ファイルを配置
-
-### ローカルで動かす場合
-
-```bash
-# KiBot (Docker)
-docker run --rm -v $(pwd):/workdir ghcr.io/inti-cmnb/kicad_auto_test:latest \
-  kibot -c .kibot.yml -b hardware/example/batteryPack.kicad_pcb \
-  -e hardware/example/batteryPack.kicad_sch
-
-# ngspice
-sudo apt install ngspice   # Ubuntu/Debian
-sudo pacman -S ngspice     # Arch
-python3 simulation/run_simulations.py
+```
+push / PR
+    │
+    ├── KiCad DRC/ERC (KiBot Docker)
+    │   ├── DRC レポート (JSON)
+    │   ├── ERC レポート (JSON)
+    │   ├── Gerber ファイル
+    │   ├── BOM (HTML/CSV)
+    │   └── PDF / 3D レンダー
+    │
+    ├── SPICE Simulation (ngspice)
+    │   ├── 自動テスト生成 (.kicad_sch → .spice)
+    │   ├── 全 .spice 実行
+    │   ├── JSON レポート出力
+    │   └── 失敗時: 波形画像生成
+    │
+    └── Discord 通知
+        ├── 成功: サマリー
+        └── 失敗: 測定値・エラー詳細
 ```
 
-## CI パイプラインの動作
-
-### トリガー
-- `hardware/**`, `simulation/**`, `.kibot.yml` の変更時
-- `main` ブランチへの push
-- Pull Request
-
-### 実行内容
-
-| Job | 内容 | 失敗条件 |
-|-----|------|----------|
-| `kicad-checks` | DRC/ERC + 成果物生成 | DRC/ERC 違反 |
-| `spice-simulation` | SPICE シミュレーション | テスト失敗 |
-| `pr-summary` | PR にコメント投稿 | （失敗しない） |
-
-### 成果物（Artifacts）
-ビルド成功時、以下が GitHub Actions の Artifacts としてダウンロード可能:
-- Gerber ファイル（製造用）
-- BOM（HTML/CSV）
-- 回路図・基板レイアウト PDF
-- 3D レンダリング画像
-- DRC/ERC レポート（JSON）
-
-## SPICE テストの書き方
-
-`simulation/` ディレクトリに `.spice` ファイルを配置するだけで自動テスト対象になる。
-
-### テストの Pass/Fail 判定
-
-`.control` ブロック内で `simulation_results.txt` に結果を書き出す:
-
-```spice
-.control
-  run
-
-  * 計算・測定
-  let expected = 2.5
-  let actual = v(out)
-  let error = abs(actual - expected)
-
-  * 結果ファイルに書き出し
-  echo "RESULT:actual=$&actual" > simulation_results.txt
-  echo "RESULT:expected=$&expected" >> simulation_results.txt
-
-  * Pass/Fail 判定
-  if error > 0.1
-    echo "STATUS:FAIL" >> simulation_results.txt
-  else
-    echo "STATUS:PASS" >> simulation_results.txt
-  end
-
-  quit
-.endc
-```
+---
 
 ## 使用ツール
 
-| ツール | 用途 | ライセンス |
-|--------|------|-----------|
-| [KiBot](https://github.com/INTI-CMNB/KiBot) | KiCad 自動化 | GPL-3.0 |
-| [KiCad](https://www.kicad.org/) | EDA ツール | GPL-3.0 |
-| [ngspice](https://ngspice.sourceforge.io/) | SPICE シミュレータ | BSD |
-| [KiDiff](https://github.com/INTI-CMNB/KiDiff) | 基板差分表示 | GPL-3.0 |
+| ツール | 用途 |
+|--------|------|
+| [KiBot](https://github.com/INTI-CMNB/KiBot) | KiCad 自動化（DRC/ERC/出力生成） |
+| [ngspice](https://ngspice.sourceforge.io/) | SPICE 回路シミュレータ |
+| [KiCad](https://www.kicad.org/) | 回路設計 EDA |
 
-## テストデータのライセンス
+## ライセンス
 
 `hardware/example/` のテストデータは [KiBot](https://github.com/INTI-CMNB/KiBot) のテストスイートから取得（GPL-3.0）。
