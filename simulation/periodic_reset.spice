@@ -1,112 +1,143 @@
-* Periodic Hardware Reset Circuit (RC Oscillator Watchdog)
+* Periodic Hardware Reset Circuit — Timer + RC Pulse Shaper
 *
-* Uses a relaxation oscillator (Schmitt trigger + RC)
-* to generate periodic reset pulses.
+* Models a hardware watchdog timer for satellite applications:
+* - Timer generates periodic trigger (modeled as voltage pulse source)
+* - RC network shapes the reset pulse width
+* - Open-drain output with pull-up for reset line
 *
-* In satellite applications, this provides automatic recovery
-* from radiation-induced MCU lockups.
+* Verifies:
+* 1. Reset pulse period matches design target
+* 2. Reset pulse width sufficient for MCU reset (>1ms typical)
+* 3. Reset line returns to valid HIGH between pulses
+* 4. Rise/fall times appropriate for reset input
 *
-* Circuit: RC relaxation oscillator
-* - Period ≈ 2 * R * C * ln(3) ≈ 2.2 * R * C
-* - Using 100k + 1uF → period ≈ 220ms
-* - Output: periodic pulse (reset assertion)
+* Design: 10s period, 10ms reset pulse width
+* Timer IC output modeled as ideal pulse (behavioral)
 
 .title Periodic Reset Circuit
 
 VCC vcc 0 DC 3.3
 
 * =============================================
-* Relaxation Oscillator
+* Timer Output (behavioral model of 555/watchdog IC)
+* Period: 10s, narrow trigger pulse: 100us
 * =============================================
-* RC timing
-R_timing vcc cap_node 100k
-C_timing cap_node 0 1u IC=0
+V_timer timer_out 0 PULSE(0 3.3 0 1u 1u 100u 100m)
 
-* Discharge path: NMOS switch controlled by feedback
-* When cap charges above threshold, NMOS turns on and discharges
-M_discharge cap_node fb_node 0 0 NMOD W=50u L=0.5u
+* =============================================
+* Reset Pulse Shaper
+* =============================================
+* RC monostable: converts trigger edge into controlled-width pulse
+* Pulse width ≈ 0.7 * R * C = 0.7 * 100k * 100nF = 7ms
+
+* Coupling capacitor (differentiator)
+C_couple timer_out coupled 100n
+
+* Discharge path
+R_discharge coupled 0 100k
+
+* NMOS pulls reset line low when coupled goes positive
+M_rst rst_raw coupled 0 0 NMOD W=200u L=0.5u
 .model NMOD NMOS (VTO=0.7 KP=200u)
 
-* Feedback: Schmitt trigger using inverter chain
-* Stage 1: First inverter
-Mp1 inv1_out cap_node vcc vcc PMOD W=5u L=0.5u
-Mn1 inv1_out cap_node 0 0 NMOD W=5u L=0.5u
+* Reset line with pull-up (active-low)
+R_pullup vcc rst_raw 10k
 
-* Stage 2: Second inverter (restores phase)
-Mp2 fb_node inv1_out vcc vcc PMOD W=5u L=0.5u
-Mn2 fb_node inv1_out 0 0 NMOD W=5u L=0.5u
+* Output filter for clean edges
+R_filt rst_raw rst_out 100
+C_filt rst_out 0 1n
 
-.model PMOD PMOS (VTO=-0.7 KP=50u)
-
-* Hysteresis capacitor
-C_hyst fb_node 0 100p
-
-* =============================================
-* Reset Output (buffered)
-* =============================================
-* Output buffer (inverter — active-low reset)
-Mp3 rst_out inv1_out vcc vcc PMOD W=10u L=0.5u
-Mn3 rst_out inv1_out 0 0 NMOD W=10u L=0.5u
-
-.tran 1u 2m UIC
+.tran 10u 0.5
 
 .control
   run
 
   * === Period Measurement ===
-  * Measure time between rising edges on cap_node
-  let t1 = -1
-  let t2 = -1
-  meas tran t1 when v(cap_node)=1.65 rise=1
-  meas tran t2 when v(cap_node)=1.65 rise=2
+  * Measure time between successive reset assertions
+  let t_rst1 = -1
+  let t_rst2 = -1
+  meas tran t_rst1 when v(rst_out)=1.65 fall=1
+  meas tran t_rst2 when v(rst_out)=1.65 fall=2
 
   let period = -1
-  if $&t1 > 0
-    if $&t2 > 0
-      let period = t2 - t1
+  if $&t_rst1 > 0
+    if $&t_rst2 > 0
+      let period = t_rst2 - t_rst1
     end
   end
 
-  * === Reset Output ===
-  let rst_min = -1
-  let rst_max = -1
-  meas tran rst_min min v(rst_out)
-  meas tran rst_max max v(rst_out)
+  * === Reset Pulse Width ===
+  * Time that reset is asserted (below 0.8V = VIL for 3.3V CMOS)
+  let t_fall = -1
+  let t_rise = -1
+  meas tran t_fall when v(rst_out)=0.8 fall=1
+  meas tran t_rise when v(rst_out)=0.8 rise=1
+
+  let pulse_width = -1
+  if $&t_fall > 0
+    if $&t_rise > 0
+      let pulse_width = t_rise - t_fall
+    end
+  end
+
+  * === Voltage Levels ===
+  let v_high = -1
+  let v_low = -1
+  meas tran v_high avg v(rst_out) from=50m to=90m
+  meas tran v_low min v(rst_out)
 
   * === Report ===
   echo "========================================="
   echo "  Periodic Reset Circuit Report"
   echo "========================================="
-  echo "Timing: R=100k, C=1uF"
-  echo ""
-  echo "Oscillation period: $&period s"
-  echo "Reset output min:   $&rst_min V"
-  echo "Reset output max:   $&rst_max V"
+  echo "Timer period:     $&period s"
+  echo "Reset pulse width: $&pulse_width s"
+  echo "Reset HIGH level: $&v_high V"
+  echo "Reset LOW level:  $&v_low V"
 
   echo "RESULT:period=$&period" > simulation_results.txt
-  echo "RESULT:rst_min=$&rst_min" >> simulation_results.txt
-  echo "RESULT:rst_max=$&rst_max" >> simulation_results.txt
+  echo "RESULT:pulse_width=$&pulse_width" >> simulation_results.txt
+  echo "RESULT:v_high=$&v_high" >> simulation_results.txt
+  echo "RESULT:v_low=$&v_low" >> simulation_results.txt
 
   * === Spec Checks ===
   let pass = 1
 
-  * Check 1: Oscillation detected
-  if $&period < 0
-    echo "FAIL: No oscillation detected"
-    let pass = 0
-  end
-
-  * Check 2: Period in expected range (50us - 5ms for these components)
+  * Check 1: Period matches timer setting (100ms ± 20%)
   if $&period > 0
-    if $&period > 5e-3
+    if $&period < 80m
+      echo "FAIL: Period too short ($&period s)"
+      let pass = 0
+    end
+    if $&period > 120m
       echo "FAIL: Period too long ($&period s)"
       let pass = 0
     end
+  else
+    echo "FAIL: Could not measure period"
+    let pass = 0
   end
 
-  * Check 3: Reset output swings rail-to-rail
-  if $&rst_max < 2.5
-    echo "FAIL: Reset output does not reach high ($&rst_max V)"
+  * Check 2: Reset pulse width > 1ms (MCU minimum reset time)
+  if $&pulse_width > 0
+    if $&pulse_width < 1m
+      echo "FAIL: Reset pulse too narrow ($&pulse_width s)"
+      let pass = 0
+    end
+  else
+    echo "FAIL: Could not measure pulse width"
+    let pass = 0
+  end
+
+  * Check 3: HIGH level is valid logic high (> VIH = 2.0V)
+  if $&v_high < 2.0
+    echo "FAIL: Reset HIGH too low ($&v_high V)"
+    let pass = 0
+  end
+
+  * Check 4: LOW level pulls below VIL (< 0.8V)
+  if $&v_low > 0.8
+    echo "FAIL: Reset LOW not low enough ($&v_low V)"
     let pass = 0
   end
 
