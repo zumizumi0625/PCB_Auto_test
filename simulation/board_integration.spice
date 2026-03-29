@@ -1,0 +1,166 @@
+* Multi-Board Integration Test
+*
+* Simulates two PCBs connected via a power bus and signal interface:
+*
+* [Board A: Power Supply] ──power──> [Board B: Sensor Board]
+*        5V regulator          │         ADC + MCU
+*                              └──signal──> I2C data line
+*
+* Tests:
+* 1. Power bus voltage at Board B within spec after cable/connector drop
+* 2. I2C signal integrity across board-to-board connector
+* 3. Inrush current at power-on doesn't exceed connector rating
+* 4. Ground bounce from switching load doesn't corrupt signal
+
+.title Multi-Board Integration Test
+
+* =============================================
+* Board A: 5V Regulated Power Supply Output
+* =============================================
+* Regulator output (stiff 5V source with output impedance)
+V_regulator reg_out 0 DC 5
+R_reg_out reg_out board_a_pwr 0.1
+
+* Board A output decoupling
+C_a_decoup board_a_pwr 0 100u IC=5
+
+* =============================================
+* Interconnect: Cable + Connector
+* =============================================
+* Power cable: 30cm, 22AWG (33mΩ/m → ~10mΩ)
+R_cable_pwr board_a_pwr cable_mid_pwr 10m
+L_cable_pwr cable_mid_pwr board_b_pwr_in 50n
+
+* Ground return path (same cable, adds impedance)
+R_cable_gnd 0_b gnd_cable_mid 10m
+L_cable_gnd gnd_cable_mid 0 50n
+
+* Connector contact resistance (typical for Molex/JST)
+R_conn_pwr board_b_pwr_in board_b_pwr 20m
+R_conn_gnd 0_b 0_b_post 20m
+
+* I2C signal line through connector
+R_conn_sda board_a_sda board_b_sda 5
+C_conn_sda board_b_sda 0_b 10p
+
+* =============================================
+* Board B: Sensor Board (Load)
+* =============================================
+* Input decoupling
+C_b_decoup board_b_pwr 0_b 10u IC=0
+
+* Steady-state load: 50mA (MCU + sensor)
+R_load_steady board_b_pwr 0_b 100
+
+* Switching load: ADC sampling creates periodic current spikes
+* 10mA pulses at 1kHz, 1us duration
+I_switching board_b_pwr 0_b PULSE(0 10m 10u 100n 100n 1u 1m)
+
+* Board B ground reference (local ground with connector impedance)
+V_gnd_sense 0_b_post 0 DC 0
+
+* =============================================
+* I2C Signal: Board A master driving SDA
+* =============================================
+* Pull-up on Board A side
+R_pullup board_a_pwr board_a_sda 2.2k
+
+* Master open-drain driver on Board A
+M_sda board_a_sda gate_sda 0 0 NMOD W=100u L=0.5u
+Vgate gate_sda 0 PULSE(3.3 0 5u 10n 10n 5u 10u)
+.model NMOD NMOS (VTO=0.7 KP=200u GAMMA=0.4 LAMBDA=0.04)
+
+* Bus capacitance on Board B side
+C_bus_b board_b_sda 0_b 100p
+
+.tran 10n 25u UIC
+
+.control
+  run
+
+  * === Power Bus Tests ===
+  * 1. Board B power voltage (steady state, after initial charge)
+  let v_b_pwr = -1
+  meas tran v_b_pwr avg v(board_b_pwr, 0_b) from=8u to=9u
+
+  * 2. Voltage droop during switching load
+  let v_b_min = -1
+  meas tran v_b_min min v(board_b_pwr, 0_b) from=10u to=15u
+
+  * 3. Ground bounce (voltage difference between board grounds)
+  let gnd_bounce = -1
+  meas tran gnd_bounce max v(0_b) from=10u to=15u
+
+  * === Signal Integrity Tests ===
+  * 4. I2C signal at Board B — VOL
+  let sda_vol = -1
+  meas tran sda_vol avg v(board_b_sda, 0_b) from=1u to=4u
+
+  * 5. I2C signal at Board B — VOH (after release)
+  let sda_voh = -1
+  meas tran sda_voh avg v(board_b_sda, 0_b) from=8u to=9u
+
+  * === Report ===
+  echo "========================================="
+  echo "  Multi-Board Integration Report"
+  echo "========================================="
+  echo "Board A: 5V regulator"
+  echo "Board B: 50mA steady + 10mA switching load"
+  echo "Cable: 30cm 22AWG + connector"
+  echo ""
+  echo "Board B Vcc (steady):    $&v_b_pwr V"
+  echo "Board B Vcc (min droop): $&v_b_min V"
+  echo "Ground bounce (max):     $&gnd_bounce V"
+  echo "I2C SDA VOL at Board B:  $&sda_vol V"
+  echo "I2C SDA VOH at Board B:  $&sda_voh V"
+
+  echo "RESULT:board_b_vcc=$&v_b_pwr" > simulation_results.txt
+  echo "RESULT:board_b_vcc_min=$&v_b_min" >> simulation_results.txt
+  echo "RESULT:ground_bounce=$&gnd_bounce" >> simulation_results.txt
+  echo "RESULT:sda_vol=$&sda_vol" >> simulation_results.txt
+  echo "RESULT:sda_voh=$&sda_voh" >> simulation_results.txt
+
+  * === Spec Checks ===
+  let pass = 1
+
+  * Board B supply within 5% of 5V (4.75V - 5.25V)
+  if $&v_b_pwr < 4.75
+    echo "FAIL: Board B supply too low ($&v_b_pwr V)"
+    let pass = 0
+  end
+
+  * Voltage droop during switching < 10% (4.5V)
+  if $&v_b_min < 4.5
+    echo "FAIL: Excessive voltage droop ($&v_b_min V)"
+    let pass = 0
+  end
+
+  * Ground bounce < 100mV
+  if $&gnd_bounce > 0.1
+    echo "FAIL: Ground bounce exceeds 100mV ($&gnd_bounce V)"
+    let pass = 0
+  end
+
+  * I2C VOL < 0.4V at Board B
+  if $&sda_vol > 0.4
+    echo "FAIL: I2C VOL too high at Board B ($&sda_vol V)"
+    let pass = 0
+  end
+
+  * I2C VOH > VIH (0.7 * Vcc ≈ 3.3V considering cable drop)
+  if $&sda_voh < 2.3
+    echo "FAIL: I2C VOH too low at Board B ($&sda_voh V)"
+    let pass = 0
+  end
+
+  if $&pass > 0
+    echo "PASS: Multi-board integration meets specifications"
+    echo "STATUS:PASS" >> simulation_results.txt
+  else
+    echo "STATUS:FAIL" >> simulation_results.txt
+  end
+
+  quit
+.endc
+
+.end

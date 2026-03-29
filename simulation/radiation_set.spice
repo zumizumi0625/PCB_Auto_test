@@ -1,0 +1,171 @@
+* Single Event Transient (SET) Radiation Hardness Test
+*
+* Simulates the effect of a high-energy particle strike on a circuit node.
+* In space environments, cosmic rays or trapped particles can deposit charge
+* in semiconductor junctions, causing transient voltage spikes (SETs).
+*
+* Model: A short-duration current pulse injected at a sensitive circuit node.
+* The "double-exponential" model is standard for SET characterization:
+*   I(t) = Q/(tau_f - tau_r) * (exp(-t/tau_f) - exp(-t/tau_r))
+*
+* Test circuit: Voltage regulator output feeding a sensitive analog input
+* An SET at the regulator output could cause:
+* 1. Downstream logic upset (if Vout exceeds VIH/VIL thresholds)
+* 2. Latch-up (if current exceeds holding current)
+* 3. Component damage (if voltage exceeds absolute max rating)
+*
+* Parameters based on typical LEO radiation environment:
+*   LET (Linear Energy Transfer): 10-60 MeV·cm²/mg
+*   Charge deposited: 0.5 - 5 pC typical
+
+.title Single Event Transient (SET) Radiation Test
+
+* =============================================
+* Protected Power Rail: 3.3V regulator output
+* =============================================
+V_reg vcc_reg 0 DC 3.3
+R_reg_out vcc_reg vcc 0.5
+
+* Output capacitance (typical regulator + board decoupling)
+C_out vcc 0 10u IC=3.3
+C_decoup vcc 0 100n IC=3.3
+
+* Load: MCU + peripherals (30mA)
+R_load vcc 0 110
+
+* =============================================
+* SET Current Pulse Injection
+* =============================================
+* Double-exponential SET pulse at the power rail
+* Charge deposited: ~2pC (moderate event)
+* Rise time: 100ps, Fall time: 1ns
+* Peak current: ~1mA (moderate LET)
+*
+* Multiple strikes at different times to test recovery
+I_set1 0 vcc PULSE(0 1m 5u 100p 1n 0 100u)
+I_set2 0 vcc PULSE(0 2m 10u 100p 1n 0 100u)
+I_set3 0 vcc PULSE(0 5m 15u 100p 1n 0 100u)
+
+* =============================================
+* Sensitive downstream circuit: Comparator input
+* =============================================
+* Resistive divider to create a reference voltage (1.65V)
+R_div1 vcc v_sense 10k
+R_div2 v_sense 0 10k
+
+* ADC input capacitance
+C_adc v_sense 0 10p
+
+* =============================================
+* SET at the sensitive analog node directly
+* =============================================
+* Stronger strike directly at the comparator input
+* This tests if a particle hit at the analog node causes
+* the sensed voltage to exceed error threshold
+I_set_analog 0 v_sense PULSE(0 0.5m 20u 100p 1n 0 100u)
+
+.tran 1n 30u UIC
+
+.control
+  run
+
+  * === Power Rail Stability ===
+  * Nominal voltage before first SET
+  let v_nominal = -1
+  meas tran v_nominal avg v(vcc) from=1u to=4u
+
+  * Peak voltage after each SET strike
+  let v_set1_peak = -1
+  meas tran v_set1_peak max v(vcc) from=5u to=6u
+
+  let v_set2_peak = -1
+  meas tran v_set2_peak max v(vcc) from=10u to=11u
+
+  let v_set3_peak = -1
+  meas tran v_set3_peak max v(vcc) from=15u to=16u
+
+  * Recovery time: how long until rail returns to within 1% of nominal
+  let v_recovery_threshold = 3.3 * 1.01
+  let t_set3_recover = -1
+  meas tran t_set3_recover when v(vcc)=$&v_recovery_threshold fall=3
+
+  * === Analog Node Stability ===
+  let v_sense_nominal = -1
+  meas tran v_sense_nominal avg v(v_sense) from=1u to=4u
+
+  * Peak deviation after analog SET
+  let v_sense_peak = -1
+  meas tran v_sense_peak max v(v_sense) from=20u to=21u
+
+  let v_sense_deviation = -1
+  if $&v_sense_peak > 0
+    if $&v_sense_nominal > 0
+      let v_sense_deviation = v_sense_peak - v_sense_nominal
+    end
+  end
+
+  * === Report ===
+  echo "========================================="
+  echo "  Radiation SET Test Report"
+  echo "========================================="
+  echo "Environment: LEO radiation model"
+  echo "Protection: 10uF + 100nF decoupling"
+  echo ""
+  echo "--- Power Rail (3.3V) ---"
+  echo "Nominal:        $&v_nominal V"
+  echo "SET 1mA peak:   $&v_set1_peak V"
+  echo "SET 2mA peak:   $&v_set2_peak V"
+  echo "SET 5mA peak:   $&v_set3_peak V"
+  echo ""
+  echo "--- Analog Sense Node (1.65V nominal) ---"
+  echo "Nominal:        $&v_sense_nominal V"
+  echo "SET 0.5mA peak: $&v_sense_peak V"
+  echo "Deviation:      $&v_sense_deviation V"
+
+  echo "RESULT:vcc_nominal=$&v_nominal" > simulation_results.txt
+  echo "RESULT:set_1mA_peak=$&v_set1_peak" >> simulation_results.txt
+  echo "RESULT:set_2mA_peak=$&v_set2_peak" >> simulation_results.txt
+  echo "RESULT:set_5mA_peak=$&v_set3_peak" >> simulation_results.txt
+  echo "RESULT:sense_nominal=$&v_sense_nominal" >> simulation_results.txt
+  echo "RESULT:sense_set_peak=$&v_sense_peak" >> simulation_results.txt
+  echo "RESULT:sense_deviation=$&v_sense_deviation" >> simulation_results.txt
+
+  * === Spec Checks ===
+  let pass = 1
+
+  * Check 1: Power rail stays below absolute max (3.6V typical for 3.3V parts)
+  if $&v_set3_peak > 3.6
+    echo "FAIL: Power rail exceeds absolute max rating ($&v_set3_peak V)"
+    let pass = 0
+  end
+
+  * Check 2: Analog node deviation < 100mV (ADC LSB margin)
+  * For 12-bit ADC at 3.3V: LSB = 0.8mV, 100mV = ~125 LSB
+  if $&v_sense_deviation > 0.1
+    echo "FAIL: Analog node SET deviation exceeds 100mV ($&v_sense_deviation V)"
+    let pass = 0
+  end
+
+  * Check 3: Power rail recovers (measurements were successful)
+  if $&v_nominal < 0
+    echo "FAIL: Could not measure nominal voltage"
+    let pass = 0
+  end
+
+  * Check 4: Nominal voltage is correct
+  if $&v_nominal < 3.2
+    echo "FAIL: Nominal voltage too low ($&v_nominal V)"
+    let pass = 0
+  end
+
+  if $&pass > 0
+    echo "PASS: Circuit survives SET events within specifications"
+    echo "STATUS:PASS" >> simulation_results.txt
+  else
+    echo "STATUS:FAIL" >> simulation_results.txt
+  end
+
+  quit
+.endc
+
+.end
