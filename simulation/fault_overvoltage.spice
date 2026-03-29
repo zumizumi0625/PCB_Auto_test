@@ -22,17 +22,16 @@ D_tvs_f vin 0 TVS_MODEL
 D_tvs_r 0 vin TVS_MODEL
 .model TVS_MODEL D (BV=5.6 IBV=10m RS=1 CJO=200p TT=5n)
 
-* Series input resistance (trace + connector)
-R_input vin v_post_tvs 0.5
+* Current-limiting series resistor (essential for TVS protection)
+* TVS only clamps the voltage across itself — the series R limits current
+* and creates a voltage drop between surge source and protected load
+R_series vin v_protected 10
 
-* Input capacitor (bulk decoupling)
-C_input v_post_tvs 0 10u IC=5
-
-* Series resistance to load
-R_trace v_post_tvs vout 0.1
+* Decoupling capacitor on protected side
+C_decoup v_protected 0 10u IC=5
 
 * Load: 100mA at 5V = 50 ohm
-R_load vout 0 50
+R_load v_protected 0 50
 
 .tran 0.5u 50u UIC
 
@@ -41,11 +40,11 @@ R_load vout 0 50
 
   * === Normal operation (before surge) ===
   let v_normal = -1
-  meas tran v_normal avg v(vout) from=5u to=19u
+  meas tran v_normal avg v(v_protected) from=5u to=19u
 
   * === During surge ===
   let v_surge_peak = -1
-  meas tran v_surge_peak max v(vout) from=20u to=30u
+  meas tran v_surge_peak max v(v_protected) from=20u to=30u
 
   * === TVS clamp voltage at input ===
   let v_clamp = -1
@@ -53,7 +52,7 @@ R_load vout 0 50
 
   * === Recovery after surge ===
   let v_recovery = -1
-  meas tran v_recovery avg v(vout) from=35u to=45u
+  meas tran v_recovery avg v(v_protected) from=35u to=45u
 
   * === Current through TVS during surge ===
   * (Positive current means TVS is conducting/clamping)

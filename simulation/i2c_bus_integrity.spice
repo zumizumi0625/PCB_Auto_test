@@ -31,8 +31,9 @@ Cbus sda 0 200p
 M1 sda gate 0 0 NMOD W=100u L=0.5u
 .model NMOD NMOS (VTO=0.7 KP=200u GAMMA=0.4 LAMBDA=0.04 CBD=5p CBS=5p)
 
-* Gate control: pull low for 5us, release for 5us (100kHz I2C clock)
-Vgate gate 0 PULSE(3.3 0 0 10n 10n 5u 10u)
+* Gate control: HIGH=NMOS ON (SDA LOW), LOW=NMOS OFF (SDA HIGH via pull-up)
+* Start with SDA driven low, release at t=2us for rise time measurement
+Vgate gate 0 PULSE(3.3 0 2u 10n 10n 5u 10u)
 
 .tran 5n 25u
 
@@ -71,13 +72,13 @@ Vgate gate 0 PULSE(3.3 0 0 10n 10n 5u 10u)
   end
 
   * === VOL Measurement ===
-  * Measure minimum voltage when NMOS is ON (first 4us)
+  * Measure minimum voltage when NMOS is ON (0.5us to 1.5us, before release)
   let vol_min = -1
-  meas tran vol_min min v(sda) from=1u to=4u
+  meas tran vol_min avg v(sda) from=0.5u to=1.5u
 
-  * === Steady-state high voltage ===
+  * === Steady-state high voltage (after pull-up charges bus) ===
   let voh = -1
-  meas tran voh max v(sda) from=6u to=9u
+  meas tran voh avg v(sda) from=5u to=6.5u
 
   * === Report ===
   echo "========================================="
