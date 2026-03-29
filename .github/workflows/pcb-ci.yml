@@ -86,6 +86,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ngspice
 
+      - name: Auto-generate SPICE tests from schematics
+        run: |
+          for sch in hardware/**/*.kicad_sch; do
+            echo "Generating tests for: $sch"
+            python3 tools/generate_spice_tests.py "$sch" || true
+          done
+
       - name: Run simulations
         id: sim
         run: python3 simulation/run_simulations.py

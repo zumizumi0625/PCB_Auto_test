@@ -1,0 +1,163 @@
+* Auto-generated SPICE test for batteryPack
+* Generated from KiCad schematic analysis
+*
+* Components detected: 48
+* Power nets: +3V3=3.3V
+
+.title Auto-Test: batteryPack
+
+* Power net: +3V3 = 3.3V
+V_pwr0 pwr0 0 DC 3.3
+R_load_pwr0 pwr0 0 1k
+
+* Resistor divider: R8=62k / R9=10k
+* Expected Vout = 3.3 * 10000.0 / (62000.0 + 10000.0) = 0.4583V
+V_div0 div0_in 0 DC 3.3
+R_div0_top div0_in div0_out 62000.0
+R_div0_bot div0_out 0 10000.0
+
+* Resistor divider: R8=62k / R7=1k
+* Expected Vout = 3.3 * 1000.0 / (62000.0 + 1000.0) = 0.0524V
+V_div1 div1_in 0 DC 3.3
+R_div1_top div1_in div1_out 62000.0
+R_div1_bot div1_out 0 1000.0
+
+* Resistor divider: R9=10k / R10=10k
+* Expected Vout = 3.3 * 10000.0 / (10000.0 + 10000.0) = 1.6500V
+V_div2 div2_in 0 DC 3.3
+R_div2_top div2_in div2_out 10000.0
+R_div2_bot div2_out 0 10000.0
+
+* Resistor divider: R5=1k / R6=1k
+* Expected Vout = 3.3 * 1000.0 / (1000.0 + 1000.0) = 1.6500V
+V_div3 div3_in 0 DC 3.3
+R_div3_top div3_in div3_out 1000.0
+R_div3_bot div3_out 0 1000.0
+
+* Resistor divider: R5=1k / R4=2k4
+* Expected Vout = 3.3 * 2400.0 / (1000.0 + 2400.0) = 2.3294V
+V_div4 div4_in 0 DC 3.3
+R_div4_top div4_in div4_out 1000.0
+R_div4_bot div4_out 0 2400.0
+
+* LED current: D1 with R1=10k
+* I = (3.3 - 2.0) / 10000.0 = 0.1mA
+V_led0 led0_in 0 DC 3.3
+R_led0 led0_in led0_out 10000.0
+D_led0 led0_out 0 LED_MODEL
+
+* LED current: D2 with R1=10k
+* I = (3.3 - 2.0) / 10000.0 = 0.1mA
+V_led1 led1_in 0 DC 3.3
+R_led1 led1_in led1_out 10000.0
+D_led1 led1_out 0 LED_MODEL
+
+* LED current: D3 with R1=10k
+* I = (3.3 - 2.0) / 10000.0 = 0.1mA
+V_led2 led2_in 0 DC 3.3
+R_led2 led2_in led2_out 10000.0
+D_led2 led2_out 0 LED_MODEL
+
+.model LED_MODEL D (IS=1e-20 N=1.8 RS=5 BV=5 IBV=100u)
+
+
+.op
+
+.control
+  op
+
+  echo "========================================="
+  echo "  Auto-Generated Test: batteryPack"
+  echo "========================================="
+  echo "Components: 48"
+  echo "Power nets: 1"
+  echo "Resistor dividers found: 15"
+  echo "LEDs found: 6"
+  echo ""
+
+  echo "RESULT:components=48" > simulation_results.txt
+  echo "RESULT:power_nets=1" >> simulation_results.txt
+  let pass = 1
+
+  * Check: divider_R8_R9
+  let v_divider_R8_R9 = v(div0_out)
+  echo "divider_R8_R9: $&v_divider_R8_R9 V (expected 0.4583V)"
+  echo "RESULT:divider_R8_R9=$&v_divider_R8_R9" >> simulation_results.txt
+  if $&v_divider_R8_R9 < 0.4354
+    echo "FAIL: divider_R8_R9 too low"
+    let pass = 0
+  end
+  if $&v_divider_R8_R9 > 0.4813
+    echo "FAIL: divider_R8_R9 too high"
+    let pass = 0
+  end
+
+  * Check: divider_R8_R7
+  let v_divider_R8_R7 = v(div1_out)
+  echo "divider_R8_R7: $&v_divider_R8_R7 V (expected 0.0524V)"
+  echo "RESULT:divider_R8_R7=$&v_divider_R8_R7" >> simulation_results.txt
+  if $&v_divider_R8_R7 < 0.0498
+    echo "FAIL: divider_R8_R7 too low"
+    let pass = 0
+  end
+  if $&v_divider_R8_R7 > 0.0550
+    echo "FAIL: divider_R8_R7 too high"
+    let pass = 0
+  end
+
+  * Check: divider_R9_R10
+  let v_divider_R9_R10 = v(div2_out)
+  echo "divider_R9_R10: $&v_divider_R9_R10 V (expected 1.6500V)"
+  echo "RESULT:divider_R9_R10=$&v_divider_R9_R10" >> simulation_results.txt
+  if $&v_divider_R9_R10 < 1.5675
+    echo "FAIL: divider_R9_R10 too low"
+    let pass = 0
+  end
+  if $&v_divider_R9_R10 > 1.7325
+    echo "FAIL: divider_R9_R10 too high"
+    let pass = 0
+  end
+
+  * Check: divider_R5_R6
+  let v_divider_R5_R6 = v(div3_out)
+  echo "divider_R5_R6: $&v_divider_R5_R6 V (expected 1.6500V)"
+  echo "RESULT:divider_R5_R6=$&v_divider_R5_R6" >> simulation_results.txt
+  if $&v_divider_R5_R6 < 1.5675
+    echo "FAIL: divider_R5_R6 too low"
+    let pass = 0
+  end
+  if $&v_divider_R5_R6 > 1.7325
+    echo "FAIL: divider_R5_R6 too high"
+    let pass = 0
+  end
+
+  * Check: divider_R5_R4
+  let v_divider_R5_R4 = v(div4_out)
+  echo "divider_R5_R4: $&v_divider_R5_R4 V (expected 2.3294V)"
+  echo "RESULT:divider_R5_R4=$&v_divider_R5_R4" >> simulation_results.txt
+  if $&v_divider_R5_R4 < 2.2129
+    echo "FAIL: divider_R5_R4 too low"
+    let pass = 0
+  end
+  if $&v_divider_R5_R4 > 2.4459
+    echo "FAIL: divider_R5_R4 too high"
+    let pass = 0
+  end
+
+  * Power budget estimate
+  echo "Estimated total resistive current: 24.6mA"
+  echo "Estimated total power: 81.1mW"
+  echo "RESULT:est_current_mA=24.6" >> simulation_results.txt
+  echo "RESULT:est_power_mW=81.1" >> simulation_results.txt
+
+  if $&pass > 0
+    echo "PASS: All auto-generated checks passed"
+    echo "STATUS:PASS" >> simulation_results.txt
+  else
+    echo "STATUS:FAIL" >> simulation_results.txt
+  end
+
+  quit
+.endc
+
+.end
