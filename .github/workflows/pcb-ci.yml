@@ -129,17 +129,18 @@ jobs:
           KICAD_RESULT: ${{ needs.kicad-checks.result }}
           SPICE_RESULT: ${{ needs.spice-simulation.result }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          COMMIT_MSG: ${{ github.event.head_commit.message }}
+          COMMIT_MSG: ${{ github.event.head_commit.message && format('{0}', github.event.head_commit.message) || 'N/A' }}
           COMMIT_SHA: ${{ github.sha }}
         run: |
           python3 << 'PYEOF'
           import json, os, urllib.request
 
-          webhook = os.environ["DISCORD_WEBHOOK"]
+          webhook = os.environ["DISCORD_WEBHOOK"].strip()
+          print(f"Webhook URL length: {len(webhook)}, starts with: {webhook[:40]}...")
           kicad = os.environ["KICAD_RESULT"]
           spice = os.environ["SPICE_RESULT"]
           run_url = os.environ["RUN_URL"]
-          commit_msg = os.environ.get("COMMIT_MSG", "")[:80]
+          commit_msg = os.environ.get("COMMIT_MSG", "").split("\n")[0][:80]
           commit_sha = os.environ.get("COMMIT_SHA", "")[:7]
 
           # Status icons
