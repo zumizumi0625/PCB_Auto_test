@@ -48,6 +48,8 @@ class DetectedPatterns:
     reset_nets: list
     has_crystal: bool
     has_ldo: bool
+    has_tvs: bool
+    has_mosfet_protection: bool
     power_nets: list
     components: list
 
@@ -111,12 +113,26 @@ def parse_schematic(sch_path: Path) -> DetectedPatterns:
         content, re.IGNORECASE
     ))
 
+    # TVS diode detection
+    has_tvs = bool(re.search(
+        r'TVS|SMBJ|SMAJ|P6KE|ESD|PESD|CDSOT|PRTR|SP0|TPD\d',
+        content, re.IGNORECASE
+    ))
+
+    # MOSFET protection detection (P-ch reverse polarity, etc.)
+    has_mosfet_protection = bool(re.search(
+        r'SI[0-9].*P|DMG|FDN|AO3401|DMP|IRLML|BSS84|NTR|CJ',
+        content, re.IGNORECASE
+    ))
+
     return DetectedPatterns(
         i2c_nets=i2c_nets,
         spi_nets=spi_nets,
         reset_nets=reset_nets,
         has_crystal=has_crystal,
         has_ldo=has_ldo,
+        has_tvs=has_tvs,
+        has_mosfet_protection=has_mosfet_protection,
         power_nets=power_nets,
         components=components,
     )
@@ -379,6 +395,124 @@ def gen_reset_checks(idx: int, vcc: float) -> list[str]:
 
 
 # ============================================================
+# Fault / Anomaly Test Templates
+# ============================================================
+
+def gen_reverse_voltage_test(idx: int, vcc: float) -> list[str]:
+    """Generate reverse voltage protection test for a power rail."""
+    return [
+        f"* === Reverse Voltage Test #{idx} ({vcc}V rail) ===",
+        f"* Simulates battery/connector reversed polarity",
+        f"* Protected load should see minimal reverse voltage",
+        f"Vin_rev{idx} vin_rev{idx} 0 DC -{vcc}",
+        f"* Series diode protection model (Schottky)",
+        f"D_prot{idx} vin_rev{idx} vout_rev{idx} SCHOTTKY_PROT",
+        f"Rload_rev{idx} vout_rev{idx} 0 100",
+        f"",
+    ]
+
+
+def gen_reverse_voltage_checks(idx: int, vcc: float) -> list[str]:
+    """Generate reverse voltage check code."""
+    return [
+        f"  * --- Reverse Voltage #{idx} ---",
+        f"  let vrev{idx} = v(vout_rev{idx})",
+        f'  echo "Reverse#{idx}: output=$&vrev{idx} V (should be near 0)"',
+        f'  echo "RESULT:reverse{idx}_vout=$&vrev{idx}" >> simulation_results.txt',
+        f"  * Protected output must stay above -{round(vcc * 0.1, 2)}V",
+        f"  if $&vrev{idx} < -{round(vcc * 0.1, 2)}",
+        f'    echo "FAIL: Reverse voltage not blocked ({vcc}V rail)"',
+        f"    let pass = 0",
+        f"  end",
+        f"",
+    ]
+
+
+def gen_overvoltage_test(idx: int, vcc: float) -> list[str]:
+    """Generate overvoltage/surge protection test."""
+    surge_v = round(vcc * 4, 1)  # 4x nominal as surge
+    return [
+        f"* === Overvoltage Surge Test #{idx} ({vcc}V rail, {surge_v}V surge) ===",
+        f"Vin_surge{idx} vin_surge{idx} 0 PULSE({vcc} {surge_v} 10u 100n 100n 10u 50u)",
+        f"* TVS clamp model",
+        f"D_tvs_f{idx} vin_surge{idx} 0 TVS_AUTO",
+        f"D_tvs_r{idx} 0 vin_surge{idx} TVS_AUTO",
+        f"* Series protection + load",
+        f"Rs_surge{idx} vin_surge{idx} vout_surge{idx} 10",
+        f"Cl_surge{idx} vout_surge{idx} 0 10u IC={vcc}",
+        f"Rl_surge{idx} vout_surge{idx} 0 50",
+        f"",
+    ]
+
+
+def gen_overvoltage_checks(idx: int, vcc: float) -> list[str]:
+    """Generate overvoltage check code."""
+    max_safe = round(vcc * 1.5, 1)
+    return [
+        f"  * --- Overvoltage Surge #{idx} ---",
+        f"  let vsurge{idx}_normal = -1",
+        f"  meas tran vsurge{idx}_normal avg v(vout_surge{idx}) from=1u to=9u",
+        f"  let vsurge{idx}_peak = -1",
+        f"  meas tran vsurge{idx}_peak max v(vout_surge{idx}) from=10u to=25u",
+        f"  let vsurge{idx}_recovery = -1",
+        f"  meas tran vsurge{idx}_recovery avg v(vout_surge{idx}) from=35u to=45u",
+        f'  echo "Surge#{idx}: normal=$&vsurge{idx}_normal V, peak=$&vsurge{idx}_peak V, recovery=$&vsurge{idx}_recovery V"',
+        f'  echo "RESULT:surge{idx}_normal=$&vsurge{idx}_normal" >> simulation_results.txt',
+        f'  echo "RESULT:surge{idx}_peak=$&vsurge{idx}_peak" >> simulation_results.txt',
+        f'  echo "RESULT:surge{idx}_recovery=$&vsurge{idx}_recovery" >> simulation_results.txt',
+        f"  * Peak must stay below {max_safe}V (1.5x nominal)",
+        f"  if $&vsurge{idx}_peak > {max_safe}",
+        f'    echo "FAIL: Surge#{idx} not clamped (peak=$&vsurge{idx}_peak V > {max_safe}V)"',
+        f"    let pass = 0",
+        f"  end",
+        f"  * Must recover after surge",
+        f"  if $&vsurge{idx}_recovery < {round(vcc * 0.9, 2)}",
+        f'    echo "FAIL: Surge#{idx} did not recover"',
+        f"    let pass = 0",
+        f"  end",
+        f"",
+    ]
+
+
+def gen_set_test(idx: int, vcc: float) -> list[str]:
+    """Generate radiation Single Event Transient test for a power rail."""
+    return [
+        f"* === Radiation SET Test #{idx} ({vcc}V rail) ===",
+        f"Vreg_set{idx} vcc_set{idx} 0 DC {vcc}",
+        f"Rout_set{idx} vcc_set{idx} vout_set{idx} 0.5",
+        f"Cout_set{idx} vout_set{idx} 0 10u IC={vcc}",
+        f"Cdec_set{idx} vout_set{idx} 0 100n IC={vcc}",
+        f"Rload_set{idx} vout_set{idx} 0 110",
+        f"* SET current pulse injection (3 intensities)",
+        f"Iset{idx}_1 0 vout_set{idx} PULSE(0 1m 5u 100p 1n 0 100u)",
+        f"Iset{idx}_2 0 vout_set{idx} PULSE(0 3m 10u 100p 1n 0 100u)",
+        f"Iset{idx}_3 0 vout_set{idx} PULSE(0 5m 15u 100p 1n 0 100u)",
+        f"",
+    ]
+
+
+def gen_set_checks(idx: int, vcc: float) -> list[str]:
+    """Generate SET check code."""
+    abs_max = round(vcc * 1.1, 2)
+    return [
+        f"  * --- Radiation SET #{idx} ({vcc}V) ---",
+        f"  let set{idx}_nominal = -1",
+        f"  meas tran set{idx}_nominal avg v(vout_set{idx}) from=1u to=4u",
+        f"  let set{idx}_peak = -1",
+        f"  meas tran set{idx}_peak max v(vout_set{idx}) from=5u to=20u",
+        f'  echo "SET#{idx}: nominal=$&set{idx}_nominal V, peak=$&set{idx}_peak V"',
+        f'  echo "RESULT:set{idx}_nominal=$&set{idx}_nominal" >> simulation_results.txt',
+        f'  echo "RESULT:set{idx}_peak=$&set{idx}_peak" >> simulation_results.txt',
+        f"  * Peak must stay below absolute max ({abs_max}V)",
+        f"  if $&set{idx}_peak > {abs_max}",
+        f'    echo "FAIL: SET#{idx} exceeds abs max ({abs_max}V)"',
+        f"    let pass = 0",
+        f"  end",
+        f"",
+    ]
+
+
+# ============================================================
 # Main Generator
 # ============================================================
 
@@ -419,6 +553,8 @@ def generate_spice(sch_name: str, patterns: DetectedPatterns) -> str:
         + (f"SPI " if patterns.spi_nets else "")
         + (f"Crystal " if patterns.has_crystal else "")
         + (f"LDO " if patterns.has_ldo else "")
+        + (f"TVS " if patterns.has_tvs else "")
+        + (f"MOSFET-Prot " if patterns.has_mosfet_protection else "")
         + (f"Reset " if patterns.reset_nets else ""),
         f"",
         f".title Auto-Test: {sch_name}",
@@ -469,6 +605,35 @@ def generate_spice(sch_name: str, patterns: DetectedPatterns) -> str:
             f'  echo "RESULT:reset_detected=true" >> simulation_results.txt',
             f"",
         ])
+
+    # ============================================================
+    # Fault / Anomaly Tests (auto-generated per power rail)
+    # ============================================================
+
+    # Reverse voltage test (always generate for each power rail)
+    if patterns.power_nets:
+        need_schottky_model = True
+        for i, pnet in enumerate(patterns.power_nets[:2]):
+            circuit_lines.extend(gen_reverse_voltage_test(i, pnet.voltage))
+            check_lines.extend(gen_reverse_voltage_checks(i, pnet.voltage))
+        circuit_lines.append(f".model SCHOTTKY_PROT D (IS=1e-5 N=1.05 RS=0.1 BV=30 CJO=10p)")
+        circuit_lines.append("")
+
+    # Overvoltage/surge test
+    if patterns.power_nets:
+        for i, pnet in enumerate(patterns.power_nets[:2]):
+            circuit_lines.extend(gen_overvoltage_test(i, pnet.voltage))
+            check_lines.extend(gen_overvoltage_checks(i, pnet.voltage))
+        circuit_lines.append(f".model TVS_AUTO D (BV={round(vcc * 1.2, 1)} IBV=10m RS=0.5 CJO=200p)")
+        circuit_lines.append("")
+        needs_tran = True
+
+    # Radiation SET test (for each power rail)
+    if patterns.power_nets:
+        for i, pnet in enumerate(patterns.power_nets[:2]):
+            circuit_lines.extend(gen_set_test(i, pnet.voltage))
+            check_lines.extend(gen_set_checks(i, pnet.voltage))
+        needs_tran = True
 
     # Resistor dividers (always check)
     divider_pairs = find_resistor_pairs(patterns.components)[:5]
