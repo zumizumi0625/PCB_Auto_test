@@ -63,9 +63,9 @@ R_div4_bot div4_out 0 2400.0
 
   * --- LDO #0 (3.3V) ---
   let ldo0_avg = -1
-  meas tran ldo0_avg avg v(vout_ldo_load0) from=5u to=9u
+  meas tran ldo0_avg avg v(vout_ldo_load0) from=10m to=50m
   let ldo0_min = -1
-  meas tran ldo0_min min v(vout_ldo_load0) from=10u to=20u
+  meas tran ldo0_min min v(vout_ldo_load0) from=10m to=100m
   echo "LDO#0: avg=$&ldo0_avg V, min=$&ldo0_min V"
   echo "RESULT:ldo0_avg=$&ldo0_avg" >> simulation_results.txt
   if $&ldo0_avg < 3.135

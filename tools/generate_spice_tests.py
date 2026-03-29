@@ -314,9 +314,9 @@ def gen_ldo_checks(idx: int, vout: float) -> list[str]:
     return [
         f"  * --- LDO #{idx} ({vout}V) ---",
         f"  let ldo{idx}_avg = -1",
-        f"  meas tran ldo{idx}_avg avg v(vout_ldo_load{idx}) from=5u to=9u",
+        f"  meas tran ldo{idx}_avg avg v(vout_ldo_load{idx}) from=10m to=50m",
         f"  let ldo{idx}_min = -1",
-        f"  meas tran ldo{idx}_min min v(vout_ldo_load{idx}) from=10u to=20u",
+        f"  meas tran ldo{idx}_min min v(vout_ldo_load{idx}) from=10m to=100m",
         f'  echo "LDO#{idx}: avg=$&ldo{idx}_avg V, min=$&ldo{idx}_min V"',
         f'  echo "RESULT:ldo{idx}_avg=$&ldo{idx}_avg" >> simulation_results.txt',
         f"  if $&ldo{idx}_avg < {low}",
