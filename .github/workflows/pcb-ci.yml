@@ -87,18 +87,115 @@ jobs:
           sudo apt-get install -y ngspice
 
       - name: Run simulations
+        id: sim
         run: python3 simulation/run_simulations.py
+        continue-on-error: true
 
-      - name: Upload waveforms on failure
+      - name: Upload simulation report
         uses: actions/upload-artifact@v4
-        if: failure()
+        if: always()
         with:
-          name: failed-waveforms
-          path: output/waveforms/
+          name: simulation-report
+          path: |
+            output/simulation_report.json
+            output/waveforms/
           retention-days: 30
 
+      - name: Check simulation result
+        if: steps.sim.outcome == 'failure'
+        run: exit 1
+
   # ============================================
-  # Job 3: PR コメントにサマリーを投稿
+  # Job 3: Discord 通知
+  # ============================================
+  discord-notify:
+    name: "Discord Notification"
+    runs-on: ubuntu-latest
+    needs: [kicad-checks, spice-simulation]
+    if: always()
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download simulation report
+        uses: actions/download-artifact@v4
+        with:
+          name: simulation-report
+          path: report/
+        continue-on-error: true
+
+      - name: Send Discord notification
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          KICAD_RESULT: ${{ needs.kicad-checks.result }}
+          SPICE_RESULT: ${{ needs.spice-simulation.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          python3 << 'PYEOF'
+          import json, os, urllib.request
+
+          webhook = os.environ["DISCORD_WEBHOOK"]
+          kicad = os.environ["KICAD_RESULT"]
+          spice = os.environ["SPICE_RESULT"]
+          run_url = os.environ["RUN_URL"]
+          commit_msg = os.environ.get("COMMIT_MSG", "")[:80]
+          commit_sha = os.environ.get("COMMIT_SHA", "")[:7]
+
+          # Status icons
+          icon = lambda s: "✅" if s == "success" else "❌" if s == "failure" else "⚠️"
+          all_pass = kicad == "success" and spice == "success"
+
+          # Build message
+          lines = []
+          if all_pass:
+              lines.append(f"## ✅ PCB CI — All Passed")
+          else:
+              lines.append(f"## ❌ PCB CI — Failures Detected")
+
+          lines.append(f"Commit: `{commit_sha}` {commit_msg}")
+          lines.append("")
+          lines.append(f"{icon(kicad)} **KiCad DRC/ERC**: {kicad}")
+          lines.append(f"{icon(spice)} **SPICE Simulation**: {spice}")
+
+          # Parse simulation report for details
+          report_path = "report/simulation_report.json"
+          if os.path.exists(report_path):
+              with open(report_path) as f:
+                  report = json.load(f)
+
+              lines.append("")
+              lines.append(f"**SPICE Results: {report['passed']}/{report['total']} passed**")
+
+              for name, test in report["tests"].items():
+                  status = test["status"]
+                  ic = "✅" if status == "PASS" else "❌"
+                  lines.append(f"  {ic} `{name}`: {status}")
+
+                  # Show values for failed tests
+                  if status == "FAIL" and test.get("values"):
+                      for k, v in test["values"].items():
+                          lines.append(f"      {k} = {v}")
+                      if test.get("message"):
+                          lines.append(f"      💡 {test['message']}")
+
+          lines.append("")
+          lines.append(f"[View Run]({run_url})")
+
+          content = "\n".join(lines)
+
+          # Send to Discord (max 2000 chars)
+          if len(content) > 1900:
+              content = content[:1900] + "\n..."
+
+          payload = json.dumps({"content": content}).encode()
+          req = urllib.request.Request(webhook, data=payload, headers={"Content-Type": "application/json"})
+          urllib.request.urlopen(req)
+          print("Discord notification sent")
+          PYEOF
+
+  # ============================================
+  # Job 4: PR コメントにサマリーを投稿
   # ============================================
   pr-summary:
     name: "PR Summary"
@@ -124,7 +221,6 @@ jobs:
 
             let body = '## 🔧 PCB CI Results\n\n';
 
-            // Check for DRC/ERC reports
             const artifactDir = 'artifacts/';
             if (fs.existsSync(artifactDir)) {
               const dirs = fs.readdirSync(artifactDir);
@@ -153,6 +249,23 @@ jobs:
                 }
                 body += '\n';
               }
+            }
+
+            // Include simulation report if available
+            const simReport = 'artifacts/simulation-report/simulation_report.json';
+            if (fs.existsSync(simReport)) {
+              const report = JSON.parse(fs.readFileSync(simReport, 'utf8'));
+              body += `### 🔬 SPICE Simulation (${report.passed}/${report.total} passed)\n`;
+              for (const [name, test] of Object.entries(report.tests)) {
+                const icon = test.status === 'PASS' ? '✅' : '❌';
+                body += `- ${icon} \`${name}\`: ${test.status}\n`;
+                if (test.status === 'FAIL' && test.values) {
+                  for (const [k, v] of Object.entries(test.values)) {
+                    body += `  - ${k} = ${v}\n`;
+                  }
+                }
+              }
+              body += '\n';
             }
 
             body += '\n---\n🤖 Generated by PCB CI';

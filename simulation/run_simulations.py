@@ -17,6 +17,7 @@ Exit codes:
 import subprocess
 import sys
 import os
+import json
 from pathlib import Path
 
 
@@ -167,6 +168,27 @@ def main():
             errors += 1
 
     print(f"\nTotal: {passed} passed, {failed} failed, {errors} errors")
+
+    # Write JSON report for CI Discord notification
+    report_path = sim_dir.parent / "output" / "simulation_report.json"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report = {
+        "total": len(results),
+        "passed": passed,
+        "failed": failed,
+        "errors": errors,
+        "tests": {
+            name: {
+                "status": r["status"],
+                "values": r.get("values", {}),
+                "message": r.get("message", ""),
+                "waveform": r.get("waveform", ""),
+            }
+            for name, r in results.items()
+        },
+    }
+    report_path.write_text(json.dumps(report, indent=2, ensure_ascii=False))
+    print(f"Report saved: {report_path}")
 
     return 1 if (failed > 0 or errors > 0) else 0
 
