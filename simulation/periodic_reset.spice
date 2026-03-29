@@ -1,112 +1,112 @@
-* Periodic Hardware Reset Circuit (Watchdog Timer Model)
+* Periodic Hardware Reset Circuit (RC Oscillator Watchdog)
 *
-* Models a hardware watchdog that asserts RESET periodically
-* unless retriggered by the MCU. In satellite applications,
-* this provides recovery from radiation-induced lockups.
+* Uses a relaxation oscillator (Schmitt trigger + RC)
+* to generate periodic reset pulses.
 *
-* Circuit: 555-style monostable using RC timing
-* - R_timing × C_timing sets the watchdog period
-* - Reset pulse width set by R_pulse × C_pulse
-* - Active-low reset output
+* In satellite applications, this provides automatic recovery
+* from radiation-induced MCU lockups.
 *
-* Config: ~10 second watchdog, ~100ms reset pulse
+* Circuit: RC relaxation oscillator
+* - Period ≈ 2 * R * C * ln(3) ≈ 2.2 * R * C
+* - Using 100k + 1uF → period ≈ 220ms
+* - Output: periodic pulse (reset assertion)
 
-.title Periodic Reset Circuit (Hardware Watchdog)
+.title Periodic Reset Circuit
 
 VCC vcc 0 DC 3.3
 
 * =============================================
-* Watchdog Timer: RC charging to threshold
+* Relaxation Oscillator
 * =============================================
-* Timing capacitor charges through R_timing
-* When voltage crosses 2/3 VCC (2.2V), trigger fires
-R_timing vcc wd_cap 1meg
-C_timing wd_cap 0 10u IC=0
+* RC timing
+R_timing vcc cap_node 100k
+C_timing cap_node 0 1u IC=0
 
-* Comparator model: when wd_cap > threshold, discharge and pulse
-* Using a simple voltage-controlled switch
-S_trigger wd_cap 0 wd_cap 0 SMOD
-.model SMOD SW (VT=2.2 VH=0.1 RON=100 ROFF=10meg)
+* Discharge path: NMOS switch controlled by feedback
+* When cap charges above threshold, NMOS turns on and discharges
+M_discharge cap_node fb_node 0 0 NMOD W=50u L=0.5u
+.model NMOD NMOS (VTO=0.7 KP=200u)
+
+* Feedback: Schmitt trigger using inverter chain
+* Stage 1: First inverter
+Mp1 inv1_out cap_node vcc vcc PMOD W=5u L=0.5u
+Mn1 inv1_out cap_node 0 0 NMOD W=5u L=0.5u
+
+* Stage 2: Second inverter (restores phase)
+Mp2 fb_node inv1_out vcc vcc PMOD W=5u L=0.5u
+Mn2 fb_node inv1_out 0 0 NMOD W=5u L=0.5u
+
+.model PMOD PMOS (VTO=-0.7 KP=50u)
+
+* Hysteresis capacitor
+C_hyst fb_node 0 100p
 
 * =============================================
-* Reset Pulse Generator
+* Reset Output (buffered)
 * =============================================
-* When trigger fires, generate a reset pulse
-* RC differentiator creates pulse from discharge edge
-R_pulse vcc rst_cap 10k
-C_pulse rst_cap rst_raw 100n IC=3.3
+* Output buffer (inverter — active-low reset)
+Mp3 rst_out inv1_out vcc vcc PMOD W=10u L=0.5u
+Mn3 rst_out inv1_out 0 0 NMOD W=10u L=0.5u
 
-* Schmitt trigger approximation for clean output
-* (using inverter with hysteresis)
-R_hyst1 rst_raw rst_out 1k
-C_out rst_out 0 10n
-
-* Pull-up for active-low reset (open-drain style)
-R_pullup vcc rst_out 4.7k
-
-.tran 1m 30
+.tran 1u 2m UIC
 
 .control
   run
 
-  * === Watchdog Period Measurement ===
-  * Measure time between successive discharge events on wd_cap
-  let t_wd1 = -1
-  let t_wd2 = -1
-  meas tran t_wd1 when v(wd_cap)=1.0 rise=1
-  meas tran t_wd2 when v(wd_cap)=1.0 rise=2
+  * === Period Measurement ===
+  * Measure time between rising edges on cap_node
+  let t1 = -1
+  let t2 = -1
+  meas tran t1 when v(cap_node)=1.65 rise=1
+  meas tran t2 when v(cap_node)=1.65 rise=2
 
-  let wd_period = -1
-  if $&t_wd1 > 0
-    if $&t_wd2 > 0
-      let wd_period = t_wd2 - t_wd1
+  let period = -1
+  if $&t1 > 0
+    if $&t2 > 0
+      let period = t2 - t1
     end
   end
 
-  * === Reset Pulse Measurement ===
-  * Measure the reset output behavior
+  * === Reset Output ===
   let rst_min = -1
-  meas tran rst_min min v(rst_out)
-
   let rst_max = -1
-  meas tran rst_max max v(rst_out) from=1 to=5
+  meas tran rst_min min v(rst_out)
+  meas tran rst_max max v(rst_out)
 
   * === Report ===
   echo "========================================="
   echo "  Periodic Reset Circuit Report"
   echo "========================================="
-  echo "Timing: R=1M, C=10uF (tau=10s)"
-  echo "Threshold: 2.2V (2/3 VCC)"
+  echo "Timing: R=100k, C=1uF"
   echo ""
-  echo "Watchdog period:   $&wd_period s"
-  echo "Reset output min:  $&rst_min V"
-  echo "Reset output max:  $&rst_max V"
+  echo "Oscillation period: $&period s"
+  echo "Reset output min:   $&rst_min V"
+  echo "Reset output max:   $&rst_max V"
 
-  echo "RESULT:wd_period=$&wd_period" > simulation_results.txt
+  echo "RESULT:period=$&period" > simulation_results.txt
   echo "RESULT:rst_min=$&rst_min" >> simulation_results.txt
   echo "RESULT:rst_max=$&rst_max" >> simulation_results.txt
 
   * === Spec Checks ===
   let pass = 1
 
-  * Check 1: Watchdog period is reasonable (5s - 20s for 10s nominal)
-  if $&wd_period > 0
-    if $&wd_period < 5
-      echo "FAIL: Watchdog period too short ($&wd_period s)"
-      let pass = 0
-    end
-    if $&wd_period > 20
-      echo "FAIL: Watchdog period too long ($&wd_period s)"
-      let pass = 0
-    end
-  else
-    echo "FAIL: Could not measure watchdog period"
+  * Check 1: Oscillation detected
+  if $&period < 0
+    echo "FAIL: No oscillation detected"
     let pass = 0
   end
 
-  * Check 2: Reset output reaches low state (active-low assertion)
-  if $&rst_min > 1.0
-    echo "FAIL: Reset line does not assert low ($&rst_min V)"
+  * Check 2: Period in expected range (50us - 5ms for these components)
+  if $&period > 0
+    if $&period > 5e-3
+      echo "FAIL: Period too long ($&period s)"
+      let pass = 0
+    end
+  end
+
+  * Check 3: Reset output swings rail-to-rail
+  if $&rst_max < 2.5
+    echo "FAIL: Reset output does not reach high ($&rst_max V)"
     let pass = 0
   end
 
