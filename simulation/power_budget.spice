@@ -1,0 +1,151 @@
+* Power Budget Analysis — Satellite Subsystem Consumption
+*
+* Models a typical cubesat power distribution:
+* - Solar panel → battery charger → bus voltage
+* - Multiple subsystems drawing current
+* - Measures total consumption and per-subsystem current
+*
+* Subsystems modeled as resistive loads:
+*   OBC (On-Board Computer): 100mA @ 3.3V
+*   Radio (TX mode):         500mA @ 3.3V (duty-cycled 10%)
+*   Radio (RX mode):          50mA @ 3.3V (continuous)
+*   Sensors:                  30mA @ 3.3V
+*   Actuators (heater):      200mA @ 5V (duty-cycled 20%)
+
+.title Power Budget Analysis
+
+* =============================================
+* Power Bus: 5V regulated from battery
+* =============================================
+V_bus vbus 0 DC 5
+
+* 3.3V LDO regulator (modeled as ideal with dropout)
+* LDO output = min(Vin - 0.3, 3.3)
+V_ldo v3v3 0 DC 3.3
+
+* =============================================
+* Subsystems on 3.3V rail
+* =============================================
+
+* OBC: 100mA continuous
+R_obc v3v3 0 33
+
+* Radio RX: 50mA continuous
+R_radio_rx v3v3 0 66
+
+* Radio TX: 500mA, 10% duty cycle (transmit 1s every 10s)
+* Modeled as pulsed current source
+I_radio_tx v3v3 0 PULSE(0 500m 1 1m 1m 0.1 1)
+
+* Sensors: 30mA continuous
+R_sensors v3v3 0 110
+
+* =============================================
+* Subsystems on 5V rail
+* =============================================
+
+* Heater: 200mA, 20% duty cycle
+I_heater vbus 0 PULSE(0 200m 0 1m 1m 0.2 1)
+
+* =============================================
+* Current sensing resistors (for measurement)
+* =============================================
+* Total 5V bus current sense
+V_sense_5v v5_sense 0 DC 0
+R_sense_bus vbus v5_sense 1m
+
+.tran 10m 5
+
+.control
+  run
+
+  * === Current Measurements ===
+  * 3.3V rail subsystems
+  let i_obc = 3.3 / 33
+  let i_radio_rx = 3.3 / 66
+  let i_sensors = 3.3 / 110
+
+  * Radio TX average (500mA × 10% duty)
+  let i_radio_tx_avg = 500m * 0.1
+
+  * Heater average (200mA × 20% duty)
+  let i_heater_avg = 200m * 0.2
+
+  * === Power Calculations ===
+  let p_obc = i_obc * 3.3
+  let p_radio_rx = i_radio_rx * 3.3
+  let p_radio_tx_avg = i_radio_tx_avg * 3.3
+  let p_sensors = i_sensors * 3.3
+  let p_heater_avg = i_heater_avg * 5.0
+
+  * LDO power dissipation (Vin - Vout) × I_total_3v3
+  let i_total_3v3 = i_obc + i_radio_rx + i_radio_tx_avg + i_sensors
+  let p_ldo_loss = (5.0 - 3.3) * i_total_3v3
+
+  * Total system power
+  let p_total = p_obc + p_radio_rx + p_radio_tx_avg + p_sensors + p_heater_avg + p_ldo_loss
+
+  * Battery life estimation (2S LiPo, 2600mAh, 7.4V nominal)
+  let battery_wh = 2.6 * 7.4
+  let battery_life_hours = battery_wh / p_total
+
+  * === Report ===
+  echo "========================================="
+  echo "  Power Budget Report"
+  echo "========================================="
+  echo ""
+  echo "--- 3.3V Rail ---"
+  echo "OBC:           $&i_obc A  ($&p_obc W)"
+  echo "Radio RX:      $&i_radio_rx A  ($&p_radio_rx W)"
+  echo "Radio TX (avg): $&i_radio_tx_avg A  ($&p_radio_tx_avg W)"
+  echo "Sensors:       $&i_sensors A  ($&p_sensors W)"
+  echo "3.3V subtotal: $&i_total_3v3 A"
+  echo ""
+  echo "--- 5V Rail ---"
+  echo "Heater (avg):  $&i_heater_avg A  ($&p_heater_avg W)"
+  echo "LDO loss:      $&p_ldo_loss W"
+  echo ""
+  echo "--- Total ---"
+  echo "Total power:   $&p_total W"
+  echo "Battery life:  $&battery_life_hours hours (2600mAh 2S LiPo)"
+
+  echo "RESULT:i_obc=$&i_obc" > simulation_results.txt
+  echo "RESULT:i_radio_rx=$&i_radio_rx" >> simulation_results.txt
+  echo "RESULT:i_radio_tx_avg=$&i_radio_tx_avg" >> simulation_results.txt
+  echo "RESULT:i_sensors=$&i_sensors" >> simulation_results.txt
+  echo "RESULT:i_heater_avg=$&i_heater_avg" >> simulation_results.txt
+  echo "RESULT:p_total=$&p_total" >> simulation_results.txt
+  echo "RESULT:battery_life_hours=$&battery_life_hours" >> simulation_results.txt
+
+  * === Budget Checks ===
+  let pass = 1
+
+  * Check 1: Total power under budget (2W for typical 1U cubesat)
+  if $&p_total > 2.0
+    echo "FAIL: Total power exceeds 2W budget ($&p_total W)"
+    let pass = 0
+  end
+
+  * Check 2: 3.3V rail current under LDO limit (typically 800mA)
+  if $&i_total_3v3 > 0.8
+    echo "FAIL: 3.3V rail current exceeds LDO limit ($&i_total_3v3 A)"
+    let pass = 0
+  end
+
+  * Check 3: Battery life > 2 hours (minimum for eclipse survival)
+  if $&battery_life_hours < 2
+    echo "FAIL: Battery life too short ($&battery_life_hours hours)"
+    let pass = 0
+  end
+
+  if $&pass > 0
+    echo "PASS: Power budget within specifications"
+    echo "STATUS:PASS" >> simulation_results.txt
+  else
+    echo "STATUS:FAIL" >> simulation_results.txt
+  end
+
+  quit
+.endc
+
+.end

@@ -1,0 +1,123 @@
+* Periodic Hardware Reset Circuit (Watchdog Timer Model)
+*
+* Models a hardware watchdog that asserts RESET periodically
+* unless retriggered by the MCU. In satellite applications,
+* this provides recovery from radiation-induced lockups.
+*
+* Circuit: 555-style monostable using RC timing
+* - R_timing × C_timing sets the watchdog period
+* - Reset pulse width set by R_pulse × C_pulse
+* - Active-low reset output
+*
+* Config: ~10 second watchdog, ~100ms reset pulse
+
+.title Periodic Reset Circuit (Hardware Watchdog)
+
+VCC vcc 0 DC 3.3
+
+* =============================================
+* Watchdog Timer: RC charging to threshold
+* =============================================
+* Timing capacitor charges through R_timing
+* When voltage crosses 2/3 VCC (2.2V), trigger fires
+R_timing vcc wd_cap 1meg
+C_timing wd_cap 0 10u IC=0
+
+* Comparator model: when wd_cap > threshold, discharge and pulse
+* Using a simple voltage-controlled switch
+S_trigger wd_cap 0 wd_cap 0 SMOD
+.model SMOD SW (VT=2.2 VH=0.1 RON=100 ROFF=10meg)
+
+* =============================================
+* Reset Pulse Generator
+* =============================================
+* When trigger fires, generate a reset pulse
+* RC differentiator creates pulse from discharge edge
+R_pulse vcc rst_cap 10k
+C_pulse rst_cap rst_raw 100n IC=3.3
+
+* Schmitt trigger approximation for clean output
+* (using inverter with hysteresis)
+R_hyst1 rst_raw rst_out 1k
+C_out rst_out 0 10n
+
+* Pull-up for active-low reset (open-drain style)
+R_pullup vcc rst_out 4.7k
+
+.tran 1m 30
+
+.control
+  run
+
+  * === Watchdog Period Measurement ===
+  * Measure time between successive discharge events on wd_cap
+  let t_wd1 = -1
+  let t_wd2 = -1
+  meas tran t_wd1 when v(wd_cap)=1.0 rise=1
+  meas tran t_wd2 when v(wd_cap)=1.0 rise=2
+
+  let wd_period = -1
+  if $&t_wd1 > 0
+    if $&t_wd2 > 0
+      let wd_period = t_wd2 - t_wd1
+    end
+  end
+
+  * === Reset Pulse Measurement ===
+  * Measure the reset output behavior
+  let rst_min = -1
+  meas tran rst_min min v(rst_out)
+
+  let rst_max = -1
+  meas tran rst_max max v(rst_out) from=1 to=5
+
+  * === Report ===
+  echo "========================================="
+  echo "  Periodic Reset Circuit Report"
+  echo "========================================="
+  echo "Timing: R=1M, C=10uF (tau=10s)"
+  echo "Threshold: 2.2V (2/3 VCC)"
+  echo ""
+  echo "Watchdog period:   $&wd_period s"
+  echo "Reset output min:  $&rst_min V"
+  echo "Reset output max:  $&rst_max V"
+
+  echo "RESULT:wd_period=$&wd_period" > simulation_results.txt
+  echo "RESULT:rst_min=$&rst_min" >> simulation_results.txt
+  echo "RESULT:rst_max=$&rst_max" >> simulation_results.txt
+
+  * === Spec Checks ===
+  let pass = 1
+
+  * Check 1: Watchdog period is reasonable (5s - 20s for 10s nominal)
+  if $&wd_period > 0
+    if $&wd_period < 5
+      echo "FAIL: Watchdog period too short ($&wd_period s)"
+      let pass = 0
+    end
+    if $&wd_period > 20
+      echo "FAIL: Watchdog period too long ($&wd_period s)"
+      let pass = 0
+    end
+  else
+    echo "FAIL: Could not measure watchdog period"
+    let pass = 0
+  end
+
+  * Check 2: Reset output reaches low state (active-low assertion)
+  if $&rst_min > 1.0
+    echo "FAIL: Reset line does not assert low ($&rst_min V)"
+    let pass = 0
+  end
+
+  if $&pass > 0
+    echo "PASS: Periodic reset circuit operating correctly"
+    echo "STATUS:PASS" >> simulation_results.txt
+  else
+    echo "STATUS:FAIL" >> simulation_results.txt
+  end
+
+  quit
+.endc
+
+.end

@@ -89,6 +89,14 @@ jobs:
       - name: Run simulations
         run: python3 simulation/run_simulations.py
 
+      - name: Upload waveforms on failure
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: failed-waveforms
+          path: output/waveforms/
+          retention-days: 30
+
   # ============================================
   # Job 3: PR コメントにサマリーを投稿
   # ============================================

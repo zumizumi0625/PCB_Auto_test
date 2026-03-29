@@ -1,0 +1,134 @@
+* Crystal Oscillator (Pierce Configuration) Test
+*
+* Models a typical MCU crystal oscillator circuit:
+* - 8MHz crystal (Butterworth-Van Dyke equivalent circuit)
+* - Load capacitors (C_L1, C_L2)
+* - Inverting amplifier (CMOS inverter model)
+* - Feedback resistor
+*
+* Tests:
+* 1. Oscillation starts within reasonable time
+* 2. Oscillation frequency is correct
+* 3. Amplitude reaches CMOS logic levels
+
+.title Crystal Oscillator - Pierce Configuration
+
+* =============================================
+* Crystal Model (Butterworth-Van Dyke equivalent)
+* 8MHz crystal parameters (typical HC-49S)
+* =============================================
+* Motional arm: Lm, Cm, Rm in series
+Lm xtal1 xm1 10.24m
+Cm xm1 xm2 38.4f
+Rm xm2 xtal2 30
+
+* Shunt capacitance
+C0 xtal1 xtal2 5p
+
+* =============================================
+* Pierce Oscillator Circuit
+* =============================================
+* Supply
+VDD vdd 0 DC 3.3
+
+* CMOS Inverter (amplifier)
+Mp xtal2 xtal1 vdd vdd PMOD W=10u L=0.5u
+Mn xtal2 xtal1 0 0 NMOD W=5u L=0.5u
+.model PMOD PMOS (VTO=-0.7 KP=50u)
+.model NMOD NMOS (VTO=0.7 KP=110u)
+
+* Feedback resistor (sets DC bias point at VDD/2)
+Rf xtal1 xtal2 1meg
+
+* Load capacitors
+CL1 xtal1 0 18p
+CL2 xtal2 0 18p
+
+* Initial condition to kick-start oscillation
+.ic v(xtal1)=1.8 v(xtal2)=1.5
+
+.tran 5n 200u UIC
+
+.control
+  run
+
+  * === Oscillation Detection ===
+  * Check if signal at xtal2 has sufficient amplitude after startup
+  * Measure peak-to-peak in the last 20us (should be settled by then)
+  let vpp_out = -1
+  meas tran v_max max v(xtal2) from=180u to=200u
+  meas tran v_min min v(xtal2) from=180u to=200u
+
+  if $&v_max > 0
+    if $&v_min >= 0
+      let vpp_out = v_max - v_min
+    end
+  end
+
+  * === Frequency Measurement ===
+  * Count zero-crossings (1.65V threshold) in last 20us
+  let f_measured = -1
+  let t_cross1 = -1
+  let t_cross2 = -1
+  meas tran t_cross1 when v(xtal2)=1.65 rise=10
+  meas tran t_cross2 when v(xtal2)=1.65 rise=11
+
+  if $&t_cross1 > 0
+    if $&t_cross2 > 0
+      let period = t_cross2 - t_cross1
+      let f_measured = 1 / period
+    end
+  end
+
+  * === Report ===
+  echo "========================================="
+  echo "  Crystal Oscillator Test Report"
+  echo "========================================="
+  echo "Crystal: 8MHz HC-49S"
+  echo "Load caps: 18pF / 18pF"
+  echo ""
+  echo "Output Vpp:       $&vpp_out V"
+  echo "Measured freq:    $&f_measured Hz"
+  echo "V_max:            $&v_max V"
+  echo "V_min:            $&v_min V"
+
+  echo "RESULT:vpp=$&vpp_out" > simulation_results.txt
+  echo "RESULT:frequency=$&f_measured" >> simulation_results.txt
+  echo "RESULT:v_max=$&v_max" >> simulation_results.txt
+  echo "RESULT:v_min=$&v_min" >> simulation_results.txt
+
+  * === Spec Checks ===
+  let pass = 1
+
+  * Check 1: Oscillation started (Vpp > 1V)
+  if $&vpp_out < 1.0
+    echo "FAIL: Oscillation not started or insufficient amplitude ($&vpp_out Vpp)"
+    let pass = 0
+  end
+
+  * Check 2: Frequency within ±0.5% of 8MHz (7.96MHz - 8.04MHz)
+  if $&f_measured > 0
+    if $&f_measured < 7.96e6
+      echo "FAIL: Frequency too low ($&f_measured Hz)"
+      let pass = 0
+    end
+    if $&f_measured > 8.04e6
+      echo "FAIL: Frequency too high ($&f_measured Hz)"
+      let pass = 0
+    end
+  else
+    echo "FAIL: Could not measure frequency"
+    let pass = 0
+  end
+
+  if $&pass > 0
+    echo "PASS: Crystal oscillator operating correctly"
+    echo "STATUS:PASS" >> simulation_results.txt
+  else
+    echo "STATUS:FAIL" >> simulation_results.txt
+  end
+
+  quit
+.endc
+
+.end
