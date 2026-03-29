@@ -6,12 +6,13 @@
 .title Auto-Test: batteryPack
 
 * === LDO Regulator Test #0 (4.3V → 3.3V) ===
-Vin_ldo0 vin_ldo0 0 DC 4.3
-Rldo_drop0 vin_ldo0 vout_ldo0 0.5
-Cldo_out0 vout_ldo0 0 10u IC=3.3
-Rldo_load0 vout_ldo0 0 33.0
+* Ideal LDO model: regulated output with output impedance
+Vldo0 vout_ldo0 0 DC 3.3
+Rldo_out0 vout_ldo0 vout_ldo_load0 0.1
+Cldo_out0 vout_ldo_load0 0 10u IC=3.3
+Rldo_load0 vout_ldo_load0 0 33.0
 * Switching load
-Ildo_sw0 vout_ldo0 0 PULSE(0 50m 10u 100n 100n 1u 10u)
+Ildo_sw0 vout_ldo_load0 0 PULSE(0 50m 10u 100n 100n 1u 10u)
 
 * === Reset Circuit Test #0 (detected: RST) ===
 VCC_rst0 vcc_rst0 0 DC 3.3
@@ -62,9 +63,9 @@ R_div4_bot div4_out 0 2400.0
 
   * --- LDO #0 (3.3V) ---
   let ldo0_avg = -1
-  meas tran ldo0_avg avg v(vout_ldo0) from=5u to=9u
+  meas tran ldo0_avg avg v(vout_ldo_load0) from=5u to=9u
   let ldo0_min = -1
-  meas tran ldo0_min min v(vout_ldo0) from=10u to=20u
+  meas tran ldo0_min min v(vout_ldo_load0) from=10u to=20u
   echo "LDO#0: avg=$&ldo0_avg V, min=$&ldo0_min V"
   echo "RESULT:ldo0_avg=$&ldo0_avg" >> simulation_results.txt
   if $&ldo0_avg < 3.135

@@ -296,12 +296,13 @@ def gen_ldo_test(idx: int, vin: float, vout: float) -> list[str]:
     """Generate LDO regulator output test."""
     return [
         f"* === LDO Regulator Test #{idx} ({vin}V → {vout}V) ===",
-        f"Vin_ldo{idx} vin_ldo{idx} 0 DC {vin}",
-        f"Rldo_drop{idx} vin_ldo{idx} vout_ldo{idx} 0.5",
-        f"Cldo_out{idx} vout_ldo{idx} 0 10u IC={vout}",
-        f"Rldo_load{idx} vout_ldo{idx} 0 {round(vout / 0.1, 1)}",
+        f"* Ideal LDO model: regulated output with output impedance",
+        f"Vldo{idx} vout_ldo{idx} 0 DC {vout}",
+        f"Rldo_out{idx} vout_ldo{idx} vout_ldo_load{idx} 0.1",
+        f"Cldo_out{idx} vout_ldo_load{idx} 0 10u IC={vout}",
+        f"Rldo_load{idx} vout_ldo_load{idx} 0 {round(vout / 0.1, 1)}",
         f"* Switching load",
-        f"Ildo_sw{idx} vout_ldo{idx} 0 PULSE(0 50m 10u 100n 100n 1u 10u)",
+        f"Ildo_sw{idx} vout_ldo_load{idx} 0 PULSE(0 50m 10u 100n 100n 1u 10u)",
         f"",
     ]
 
@@ -313,9 +314,9 @@ def gen_ldo_checks(idx: int, vout: float) -> list[str]:
     return [
         f"  * --- LDO #{idx} ({vout}V) ---",
         f"  let ldo{idx}_avg = -1",
-        f"  meas tran ldo{idx}_avg avg v(vout_ldo{idx}) from=5u to=9u",
+        f"  meas tran ldo{idx}_avg avg v(vout_ldo_load{idx}) from=5u to=9u",
         f"  let ldo{idx}_min = -1",
-        f"  meas tran ldo{idx}_min min v(vout_ldo{idx}) from=10u to=20u",
+        f"  meas tran ldo{idx}_min min v(vout_ldo_load{idx}) from=10u to=20u",
         f'  echo "LDO#{idx}: avg=$&ldo{idx}_avg V, min=$&ldo{idx}_min V"',
         f'  echo "RESULT:ldo{idx}_avg=$&ldo{idx}_avg" >> simulation_results.txt',
         f"  if $&ldo{idx}_avg < {low}",
