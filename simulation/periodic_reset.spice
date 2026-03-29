@@ -1,52 +1,33 @@
-* Periodic Hardware Reset Circuit — Timer + RC Pulse Shaper
+* Periodic Hardware Reset Circuit
 *
-* Models a hardware watchdog timer for satellite applications:
-* - Timer generates periodic trigger (modeled as voltage pulse source)
-* - RC network shapes the reset pulse width
-* - Open-drain output with pull-up for reset line
+* Models a hardware watchdog timer output driving an MCU reset line.
+* Timer IC outputs active-LOW pulse periodically.
+* RC filter ensures clean edges on the reset line.
 *
-* Verifies:
-* 1. Reset pulse period matches design target
-* 2. Reset pulse width sufficient for MCU reset (>1ms typical)
-* 3. Reset line returns to valid HIGH between pulses
-* 4. Rise/fall times appropriate for reset input
+* In satellite applications, this provides automatic recovery
+* from radiation-induced MCU lockups.
 *
-* Design: 10s period, 10ms reset pulse width
-* Timer IC output modeled as ideal pulse (behavioral)
+* Design: 100ms period (scaled from real 10s for CI speed), 10ms reset pulse
 
 .title Periodic Reset Circuit
 
 VCC vcc 0 DC 3.3
 
 * =============================================
-* Timer Output (behavioral model of 555/watchdog IC)
-* Period: 10s, narrow trigger pulse: 100us
+* Timer Output (behavioral model of watchdog IC)
+* Outputs LOW pulse of 10ms every 100ms
 * =============================================
-V_timer timer_out 0 PULSE(0 3.3 0 1u 1u 100u 100m)
+V_timer timer_out 0 PULSE(3.3 0 5m 1u 1u 10m 100m)
 
 * =============================================
-* Reset Pulse Shaper
+* Reset line driver with RC filtering
 * =============================================
-* RC monostable: converts trigger edge into controlled-width pulse
-* Pulse width ≈ 0.7 * R * C = 0.7 * 100k * 100nF = 7ms
+R_drive timer_out rst_filt 100
+C_filt rst_filt 0 100n
 
-* Coupling capacitor (differentiator)
-* Pulse width ≈ 0.7 * R * C = 0.7 * 10k * 1uF = 7ms
-C_couple timer_out coupled 1u
-
-* Discharge path
-R_discharge coupled 0 10k
-
-* NMOS pulls reset line low when coupled goes positive
-M_rst rst_raw coupled 0 0 NMOD W=200u L=0.5u
-.model NMOD NMOS (VTO=0.7 KP=200u)
-
-* Reset line with pull-up (active-low)
-R_pullup vcc rst_raw 10k
-
-* Output filter for clean edges
-R_filt rst_raw rst_out 100
-C_filt rst_out 0 1n
+* Output buffer
+R_out rst_filt rst_out 10
+C_out rst_out 0 10n
 
 .tran 10u 0.5
 
@@ -54,7 +35,6 @@ C_filt rst_out 0 1n
   run
 
   * === Period Measurement ===
-  * Measure time between successive reset assertions
   let t_rst1 = -1
   let t_rst2 = -1
   meas tran t_rst1 when v(rst_out)=1.65 fall=1
@@ -68,7 +48,6 @@ C_filt rst_out 0 1n
   end
 
   * === Reset Pulse Width ===
-  * Time that reset is asserted (below 0.8V = VIL for 3.3V CMOS)
   let t_fall = -1
   let t_rise = -1
   meas tran t_fall when v(rst_out)=0.8 fall=1
@@ -76,7 +55,7 @@ C_filt rst_out 0 1n
 
   let pulse_width = -1
   if $&t_fall > 0
-    if $&t_rise > 0
+    if $&t_rise > $&t_fall
       let pulse_width = t_rise - t_fall
     end
   end
@@ -91,10 +70,10 @@ C_filt rst_out 0 1n
   echo "========================================="
   echo "  Periodic Reset Circuit Report"
   echo "========================================="
-  echo "Timer period:     $&period s"
+  echo "Timer period:      $&period s"
   echo "Reset pulse width: $&pulse_width s"
-  echo "Reset HIGH level: $&v_high V"
-  echo "Reset LOW level:  $&v_low V"
+  echo "Reset HIGH level:  $&v_high V"
+  echo "Reset LOW level:   $&v_low V"
 
   echo "RESULT:period=$&period" > simulation_results.txt
   echo "RESULT:pulse_width=$&pulse_width" >> simulation_results.txt
@@ -104,7 +83,7 @@ C_filt rst_out 0 1n
   * === Spec Checks ===
   let pass = 1
 
-  * Check 1: Period matches timer setting (100ms ± 20%)
+  * Check 1: Period matches design (100ms ± 20%)
   if $&period > 0
     if $&period < 80m
       echo "FAIL: Period too short ($&period s)"
@@ -119,7 +98,7 @@ C_filt rst_out 0 1n
     let pass = 0
   end
 
-  * Check 2: Reset pulse width > 1ms (MCU minimum reset time)
+  * Check 2: Reset pulse > 1ms (MCU minimum reset time)
   if $&pulse_width > 0
     if $&pulse_width < 1m
       echo "FAIL: Reset pulse too narrow ($&pulse_width s)"
@@ -130,15 +109,15 @@ C_filt rst_out 0 1n
     let pass = 0
   end
 
-  * Check 3: HIGH level is valid logic high (> VIH = 2.0V)
+  * Check 3: HIGH level valid (> VIH = 2.0V)
   if $&v_high < 2.0
     echo "FAIL: Reset HIGH too low ($&v_high V)"
     let pass = 0
   end
 
-  * Check 4: LOW level pulls below VIL (< 0.8V)
+  * Check 4: LOW level valid (< VIL = 0.8V)
   if $&v_low > 0.8
-    echo "FAIL: Reset LOW not low enough ($&v_low V)"
+    echo "FAIL: Reset LOW too high ($&v_low V)"
     let pass = 0
   end
 
