@@ -46,7 +46,7 @@ V_div4 div4_in 0 DC 3.3
 R_div4_top div4_in div4_out 1000.0
 R_div4_bot div4_out 0 2400.0
 
-.tran 10n 0.5 UIC
+.tran 100u 0.3 UIC
 .op
 
 .control

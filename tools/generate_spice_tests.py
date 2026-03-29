@@ -406,6 +406,7 @@ def generate_spice(sch_name: str, patterns: DetectedPatterns) -> str:
     tran_time = "25u"
 
     vcc = patterns.power_nets[0].voltage if patterns.power_nets else 3.3
+    tran_step = "10n"
 
     # Header
     circuit_lines.extend([
@@ -452,13 +453,21 @@ def generate_spice(sch_name: str, patterns: DetectedPatterns) -> str:
             check_lines.extend(gen_ldo_checks(i, pnet.voltage))
         needs_tran = True
 
-    # Reset
-    if patterns.reset_nets:
+    # Reset — only add if no crystal (crystal needs 200u, reset needs 0.5s — incompatible)
+    if patterns.reset_nets and not patterns.has_crystal:
         circuit_lines.extend(gen_reset_test(0, vcc, patterns.reset_nets))
         check_lines.extend(gen_reset_checks(0, vcc))
         needs_tran = True
-        if tran_time == "25u":
-            tran_time = "0.5"
+        tran_time = "0.3"
+        # Coarser step for reset simulation
+        tran_step = "100u"
+    elif patterns.reset_nets:
+        # Just note detection without simulation (crystal takes priority)
+        check_lines.extend([
+            f'  echo "Reset lines detected: {", ".join(patterns.reset_nets[:3])}"',
+            f'  echo "RESULT:reset_detected=true" >> simulation_results.txt',
+            f"",
+        ])
 
     # Resistor dividers (always check)
     divider_pairs = find_resistor_pairs(patterns.components)[:5]
@@ -503,7 +512,7 @@ def generate_spice(sch_name: str, patterns: DetectedPatterns) -> str:
     lines = circuit_lines[:]
 
     if needs_tran:
-        lines.append(f".tran 10n {tran_time} UIC")
+        lines.append(f".tran {tran_step} {tran_time} UIC")
     lines.append(f".op")
     lines.append(f"")
     lines.append(f".control")
