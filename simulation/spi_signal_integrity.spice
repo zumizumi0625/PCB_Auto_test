@@ -1,52 +1,134 @@
-* SPI Signal Integrity — Clock Signal Quality Check
+* SPI Signal Integrity — Trace Model with Timing Verification
 *
-* Tests SCLK through a simplified trace model
-* Checks that signal reaches proper logic levels
+* Models a realistic SPI bus:
+* - CMOS push-pull driver with output impedance
+* - PCB trace as lumped RLC model
+* - Slave device input capacitance
+* - Measures: rise time, overshoot, undershoot, MOSI setup time
+*
+* SPI Mode 0 (CPOL=0, CPHA=0):
+*   Data sampled on SCLK rising edge
+*   MOSI must be stable tsu before SCLK rising edge
+*   Typical tsu > 5ns for most SPI slaves
 
 .title SPI Signal Integrity
 
-* SCLK source — 1MHz
-Vsclk sclk_src 0 PULSE(0 3.3 0 5n 5n 500n 1u)
+* === SCLK Line ===
+* 1MHz SPI clock (push-pull CMOS driver)
+Vsclk_drv sclk_src 0 PULSE(0 3.3 100n 2n 2n 500n 1u)
 
-* Driver output impedance
-Rdrv sclk_src sclk_a 33
+* Driver output impedance (33 ohm series termination)
+Rdrv_sclk sclk_src sclk_a 33
 
-* Trace model (lumped LC)
-Ltrace sclk_a sclk_b 10n
-Rtrace sclk_b sclk 10
+* PCB trace model (10cm trace, ~1nH/mm, ~0.1pF/mm)
+Ltrace_sclk sclk_a sclk_b 10n
+Rtrace_sclk sclk_b sclk_c 2
+Ctrace_sclk sclk_c 0 10p
 
-* Load (slave device input capacitance)
-Cload sclk 0 15p
+* Slave device input capacitance
+Cin_sclk sclk_c 0 15p
 
-.tran 1n 3u
+* === MOSI Line ===
+* Data transitions 50ns before clock (setup time)
+Vmosi_drv mosi_src 0 PULSE(0 3.3 50n 2n 2n 500n 1u)
+
+Rdrv_mosi mosi_src mosi_a 33
+Ltrace_mosi mosi_a mosi_b 10n
+Rtrace_mosi mosi_b mosi_c 2
+Ctrace_mosi mosi_c 0 10p
+Cin_mosi mosi_c 0 15p
+
+.tran 0.5n 4u
 
 .control
   run
 
-  meas tran vmax max v(sclk)
-  meas tran vmin min v(sclk)
+  * === SCLK Rise Time (10% to 90%) ===
+  let sclk_tr_start = -1
+  let sclk_tr_end = -1
+  meas tran sclk_tr_start when v(sclk_c)=0.33 rise=1
+  meas tran sclk_tr_end when v(sclk_c)=2.97 rise=1
 
-  echo "=== SPI Signal Results ==="
-  echo "SCLK max:" $&vmax "V"
-  echo "SCLK min:" $&vmin "V"
+  let sclk_rise = -1
+  if $&sclk_tr_start > 0
+    if $&sclk_tr_end > 0
+      let sclk_rise = sclk_tr_end - sclk_tr_start
+    end
+  end
 
-  echo "RESULT:sclk_max=$&vmax" > simulation_results.txt
-  echo "RESULT:sclk_min=$&vmin" >> simulation_results.txt
+  * === Overshoot / Undershoot ===
+  let sclk_max = -1
+  let sclk_min = 99
+  meas tran sclk_max max v(sclk_c)
+  meas tran sclk_min min v(sclk_c)
 
-  * Check signal reaches valid levels
+  * Overshoot percentage above VCC
+  let overshoot_pct = (sclk_max - 3.3) / 3.3 * 100
+
+  * === MOSI Setup Time ===
+  * Time between MOSI reaching VIH and SCLK rising edge
+  let t_mosi_vih = -1
+  let t_sclk_edge = -1
+  meas tran t_mosi_vih when v(mosi_c)=2.31 rise=1
+  meas tran t_sclk_edge when v(sclk_c)=1.65 rise=1
+
+  let setup_time = -1
+  if $&t_mosi_vih > 0
+    if $&t_sclk_edge > 0
+      let setup_time = t_sclk_edge - t_mosi_vih
+    end
+  end
+
+  * === Report ===
+  echo "========================================="
+  echo "  SPI Signal Integrity Report"
+  echo "========================================="
+  echo "Clock: 1MHz, Trace: 10cm, Load: 15pF"
+  echo ""
+  echo "SCLK Rise time:      $&sclk_rise s"
+  echo "SCLK Max (overshoot): $&sclk_max V"
+  echo "SCLK Min (undershoot): $&sclk_min V"
+  echo "Overshoot:            $&overshoot_pct %"
+  echo "MOSI Setup time:      $&setup_time s"
+
+  * === Write results ===
+  echo "RESULT:sclk_rise_time=$&sclk_rise" > simulation_results.txt
+  echo "RESULT:sclk_max=$&sclk_max" >> simulation_results.txt
+  echo "RESULT:sclk_min=$&sclk_min" >> simulation_results.txt
+  echo "RESULT:overshoot_pct=$&overshoot_pct" >> simulation_results.txt
+  echo "RESULT:mosi_setup_time=$&setup_time" >> simulation_results.txt
+
+  * === Spec checks ===
   let pass = 1
-  if vmax < 2.5
-    let pass = 0
-  end
-  if vmin > 0.5
+
+  * Check 1: Overshoot < VCC + 10% (3.63V)
+  if $&sclk_max > 3.63
+    echo "FAIL: SCLK overshoot exceeds VCC+10% ($&sclk_max V)"
     let pass = 0
   end
 
-  if pass
-    echo "PASS: SPI signal quality OK"
+  * Check 2: Undershoot > -0.3V (absolute max rating margin)
+  if $&sclk_min < -0.3
+    echo "FAIL: SCLK undershoot below -0.3V ($&sclk_min V)"
+    let pass = 0
+  end
+
+  * Check 3: Setup time > 5ns (typical SPI slave requirement)
+  if $&setup_time < 5e-9
+    echo "FAIL: MOSI setup time too short ($&setup_time s)"
+    let pass = 0
+  end
+
+  * Check 4: Rise time was measurable
+  if $&sclk_rise < 0
+    echo "FAIL: Could not measure SCLK rise time"
+    let pass = 0
+  end
+
+  if $&pass > 0
+    echo "PASS: SPI signals meet integrity requirements"
     echo "STATUS:PASS" >> simulation_results.txt
   else
-    echo "FAIL: SPI signal quality issue"
     echo "STATUS:FAIL" >> simulation_results.txt
   end
 

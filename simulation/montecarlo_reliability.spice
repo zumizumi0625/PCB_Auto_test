@@ -1,51 +1,141 @@
-* Worst-Case Component Tolerance Analysis
+* Monte Carlo Reliability Analysis — Statistical Component Tolerance
 *
-* Voltage divider: Vout = Vin * R2/(R1+R2)
-* With 5% tolerance, check output stays within spec
+* Performs 50 Monte Carlo iterations on a voltage reference circuit
+* with 5% resistor tolerance (Gaussian distribution, 3-sigma = 5%)
+*
+* Circuit: Voltage divider Vout = Vin * R2/(R1+R2)
+* Nominal: 5V * 10k/(10k+10k) = 2.5V
+*
+* Acceptance criteria:
+*   All samples must be within ±10% of nominal (2.25V - 2.75V)
+*   Standard deviation must be < 5% of nominal (< 0.125V)
 
-.title Component Tolerance Analysis
-
-* Worst case LOW: R1=max(10.5k), R2=min(9.5k)
-* Vout = 5 * 9.5k / (10.5k + 9.5k) = 2.375V
+.title Monte Carlo Reliability - Resistor Tolerance Analysis
 
 V1 in 0 DC 5
-R1 in out 10.5k
-R2 out 0 9.5k
+R1 in out 10k
+R2 out 0 10k
 
 .control
-  op
-  let vout_low = v(out)
-  echo "Worst case LOW Vout:" $&vout_low "V"
+  * Monte Carlo parameters
+  let mc_runs = 50
+  let nominal_vout = 2.5
+  let r1_nom = 10e3
+  let r2_nom = 10e3
 
-  * Worst case HIGH: R1=min(9.5k), R2=max(10.5k)
-  * Vout = 5 * 10.5k / (9.5k + 10.5k) = 2.625V
-  alter R1 = 9.5k
-  alter R2 = 10.5k
-  op
-  let vout_high = v(out)
-  echo "Worst case HIGH Vout:" $&vout_high "V"
+  * Gaussian tolerance function: nom * (1 + tolerance/3sigma * gauss)
+  define tol_gauss(nom, pct_3sig) (nom * (1 + pct_3sig/100/3 * sgauss(0)))
 
-  echo "=== Tolerance Analysis (5% resistors) ==="
-  echo "Low:" $&vout_low "V"
-  echo "High:" $&vout_high "V"
+  * Seed for reproducibility
+  setseed 42
 
-  echo "RESULT:vout_low=$&vout_low" > simulation_results.txt
-  echo "RESULT:vout_high=$&vout_high" >> simulation_results.txt
+  * Storage for results
+  set curplot = new
+  let storage_plot = $curplot
+  let vout_data = unitvec(mc_runs)
+  let vout_min = 100
+  let vout_max = -100
+  let fail_count = 0
+  let run = 0
 
-  * Both must be within 2.25V - 2.75V (±10% of 2.5V)
+  setplot $storage_plot
+
+  dowhile run < mc_runs
+    * Randomize component values (5% tolerance, 3-sigma)
+    let r1_val = tol_gauss(r1_nom, 5)
+    let r2_val = tol_gauss(r2_nom, 5)
+
+    alter R1 $&r1_val
+    alter R2 $&r2_val
+    op
+
+    let vout_i = v(out)
+    let {$storage_plot}.vout_data[run] = vout_i
+
+    * Track min/max
+    if $&vout_i < $&vout_min
+      let vout_min = vout_i
+    end
+    if $&vout_i > $&vout_max
+      let vout_max = vout_i
+    end
+
+    * Check if out of spec
+    if $&vout_i < 2.25
+      let fail_count = fail_count + 1
+    end
+    if $&vout_i > 2.75
+      let fail_count = fail_count + 1
+    end
+
+    destroy $curplot
+    let run = run + 1
+  end
+
+  * Calculate statistics
+  setplot $storage_plot
+  let vout_mean = mean(vout_data)
+  let vout_stddev = stddev(vout_data)
+  let spread = vout_max - vout_min
+  let variation_pct = vout_stddev / nominal_vout * 100
+
+  * === Report ===
+  echo "========================================="
+  echo "  Monte Carlo Reliability Report"
+  echo "========================================="
+  echo "Runs:       $&mc_runs"
+  echo "Components: R1=10k, R2=10k (5% tolerance)"
+  echo "Nominal:    $&nominal_vout V"
+  echo ""
+  echo "Mean Vout:  $&vout_mean V"
+  echo "Std Dev:    $&vout_stddev V"
+  echo "Min Vout:   $&vout_min V"
+  echo "Max Vout:   $&vout_max V"
+  echo "Spread:     $&spread V"
+  echo "Variation:  $&variation_pct %"
+  echo "Failures:   $&fail_count / $&mc_runs"
+
+  * === Write results ===
+  echo "RESULT:mc_runs=$&mc_runs" > simulation_results.txt
+  echo "RESULT:mean=$&vout_mean" >> simulation_results.txt
+  echo "RESULT:stddev=$&vout_stddev" >> simulation_results.txt
+  echo "RESULT:min=$&vout_min" >> simulation_results.txt
+  echo "RESULT:max=$&vout_max" >> simulation_results.txt
+  echo "RESULT:spread=$&spread" >> simulation_results.txt
+  echo "RESULT:variation_pct=$&variation_pct" >> simulation_results.txt
+  echo "RESULT:fail_count=$&fail_count" >> simulation_results.txt
+
+  * === Acceptance criteria ===
   let pass = 1
-  if vout_low < 2.25
-    let pass = 0
-  end
-  if vout_high > 2.75
+
+  * Check 1: No samples outside ±10% of nominal
+  if $&fail_count > 0
+    echo "FAIL: $&fail_count sample(s) outside acceptance range"
     let pass = 0
   end
 
-  if pass
-    echo "PASS: Output within tolerance"
+  * Check 2: Standard deviation < 5% of nominal
+  if $&variation_pct > 5
+    echo "FAIL: Variation too high ($&variation_pct %)"
+    let pass = 0
+  end
+
+  * Check 3: Min within spec
+  if $&vout_min < 2.25
+    echo "FAIL: Minimum output below spec ($&vout_min V)"
+    let pass = 0
+  end
+
+  * Check 4: Max within spec
+  if $&vout_max > 2.75
+    echo "FAIL: Maximum output above spec ($&vout_max V)"
+    let pass = 0
+  end
+
+  if $&pass > 0
+    echo "PASS: All $&mc_runs samples within acceptance criteria"
     echo "STATUS:PASS" >> simulation_results.txt
   else
-    echo "FAIL: Output exceeds tolerance"
     echo "STATUS:FAIL" >> simulation_results.txt
   end
 

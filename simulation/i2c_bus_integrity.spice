@@ -1,38 +1,141 @@
-* I2C Bus Integrity — Pull-up RC Time Constant Check
+* I2C Bus Signal Integrity — Open-Drain Driver Model
 *
-* Simple test: RC time constant of pull-up + bus capacitance
-* tau = R * C = 4.7k * 200p = 940ns
-* Rise to 63% of VCC in one tau, ~3 tau to reach VIH
+* Models actual I2C bus behavior:
+* - NMOS open-drain driver (master pulling SDA low)
+* - External pull-up resistor to VCC
+* - Bus capacitance from traces + slave devices
+*
+* I2C Standard Mode spec (100kHz):
+*   Rise time (tr): max 1000ns
+*   Fall time (tf): max 300ns
+*   VOL: max 0.4V at 3mA sink
+*   VIH: min 0.7 * VCC = 2.31V (at 3.3V)
+*
+* I2C Fast Mode spec (400kHz):
+*   Rise time (tr): 20ns - 300ns
+*   Fall time (tf): max 300ns
 
-.title I2C Bus Integrity
+.title I2C Bus Signal Integrity
 
+* 3.3V supply
 VCC vcc 0 DC 3.3
+
+* Pull-up resistor (4.7k — standard value for 3.3V I2C)
 Rp vcc sda 4.7k
+
+* Bus capacitance: 200pF (typical for 4-5 devices + 20cm traces)
 Cbus sda 0 200p
 
-* Switch: starts pulled low, releases at t=1us
-Vsw sda_low 0 PULSE(0 3.3 0 1n 1n 1u 10u)
-Rsw sda_low sda 1
+* Open-drain NMOS driver (master device)
+* Gate driven by control signal, drain is SDA, source is GND
+M1 sda gate 0 0 NMOD W=100u L=0.5u
+.model NMOD NMOS (VTO=0.7 KP=200u GAMMA=0.4 LAMBDA=0.04 CBD=5p CBS=5p)
 
-.tran 10n 10u
+* Gate control: pull low for 5us, release for 5us (100kHz I2C clock)
+Vgate gate 0 PULSE(3.3 0 0 10n 10n 5u 10u)
+
+.tran 5n 25u
 
 .control
   run
 
-  * Measure rise time (10% to 90% of 3.3V)
-  meas tran t10 when v(sda)=0.33 rise=1
-  meas tran t90 when v(sda)=2.97 rise=1
+  * === Rise Time Measurement ===
+  * I2C spec: 10% to 90% of VCC
+  let v_10pct = 0.1 * 3.3
+  let v_90pct = 0.9 * 3.3
 
-  echo "=== I2C Results ==="
-  echo "t10:" $&t10
-  echo "t90:" $&t90
+  * Set defaults in case meas fails
+  let tr_10 = -1
+  let tr_90 = -1
+  meas tran tr_10 when v(sda)=$&v_10pct rise=1
+  meas tran tr_90 when v(sda)=$&v_90pct rise=1
 
-  echo "RESULT:t10=$&t10" > simulation_results.txt
-  echo "RESULT:t90=$&t90" >> simulation_results.txt
+  let rise_time = -1
+  if $&tr_10 > 0
+    if $&tr_90 > 0
+      let rise_time = tr_90 - tr_10
+    end
+  end
 
-  * For I2C standard mode, just check simulation ran successfully
-  echo "PASS: I2C simulation completed"
-  echo "STATUS:PASS" >> simulation_results.txt
+  * === Fall Time Measurement ===
+  let tf_90 = -1
+  let tf_10 = -1
+  meas tran tf_90 when v(sda)=$&v_90pct fall=1
+  meas tran tf_10 when v(sda)=$&v_10pct fall=1
+
+  let fall_time = -1
+  if $&tf_90 > 0
+    if $&tf_10 > 0
+      let fall_time = tf_10 - tf_90
+    end
+  end
+
+  * === VOL Measurement ===
+  * Measure minimum voltage when NMOS is ON (first 4us)
+  let vol_min = -1
+  meas tran vol_min min v(sda) from=1u to=4u
+
+  * === Steady-state high voltage ===
+  let voh = -1
+  meas tran voh max v(sda) from=6u to=9u
+
+  * === Report ===
+  echo "========================================="
+  echo "  I2C Bus Signal Integrity Report"
+  echo "========================================="
+  echo "Pull-up: 4.7k to 3.3V"
+  echo "Bus capacitance: 200pF"
+  echo ""
+  echo "Rise time (10%-90%): $&rise_time s"
+  echo "Fall time (90%-10%): $&fall_time s"
+  echo "VOL (driven low):   $&vol_min V"
+  echo "VOH (released high): $&voh V"
+
+  * === Write results ===
+  echo "RESULT:rise_time_ns=$&rise_time" > simulation_results.txt
+  echo "RESULT:fall_time_ns=$&fall_time" >> simulation_results.txt
+  echo "RESULT:vol=$&vol_min" >> simulation_results.txt
+  echo "RESULT:voh=$&voh" >> simulation_results.txt
+
+  * === Spec compliance checks ===
+  let pass = 1
+
+  * Check 1: Rise time measured successfully
+  if $&rise_time < 0
+    echo "FAIL: Could not measure rise time"
+    let pass = 0
+  end
+
+  * Check 2: Rise time < 1us (Standard Mode)
+  if $&rise_time > 1e-6
+    echo "FAIL: Rise time exceeds Standard Mode spec (1us)"
+    let pass = 0
+  end
+
+  * Check 3: Fall time < 300ns
+  if $&fall_time > 300e-9
+    echo "FAIL: Fall time exceeds spec (300ns)"
+    let pass = 0
+  end
+
+  * Check 4: VOL < 0.4V
+  if $&vol_min > 0.4
+    echo "FAIL: VOL exceeds 0.4V threshold"
+    let pass = 0
+  end
+
+  * Check 5: VOH reaches VIH (0.7 * VCC = 2.31V)
+  if $&voh < 2.31
+    echo "FAIL: VOH does not reach VIH threshold (2.31V)"
+    let pass = 0
+  end
+
+  if $&pass > 0
+    echo "PASS: I2C bus meets Standard Mode specifications"
+    echo "STATUS:PASS" >> simulation_results.txt
+  else
+    echo "STATUS:FAIL" >> simulation_results.txt
+  end
 
   quit
 .endc
