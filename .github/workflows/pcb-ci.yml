@@ -190,8 +190,17 @@ jobs:
               content = content[:1900] + "\n..."
 
           payload = json.dumps({"content": content}).encode()
-          req = urllib.request.Request(webhook, data=payload, headers={"Content-Type": "application/json"})
-          urllib.request.urlopen(req)
+          req = urllib.request.Request(webhook, data=payload, headers={
+              "Content-Type": "application/json",
+              "User-Agent": "PCB-CI-Bot/1.0",
+          })
+          try:
+              urllib.request.urlopen(req)
+          except urllib.error.HTTPError as e:
+              print(f"Discord webhook error: {e.code} {e.reason}")
+              body = e.read().decode()
+              print(f"Response: {body}")
+              raise
           print("Discord notification sent")
           PYEOF
 
