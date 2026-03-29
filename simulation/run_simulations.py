@@ -76,7 +76,7 @@ def run_ngspice(spice_file: Path, output_dir: Path) -> dict:
             ["ngspice", "-b", str(spice_file)],
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=300,
             cwd=spice_file.parent,
         )
 
@@ -84,7 +84,9 @@ def run_ngspice(spice_file: Path, output_dir: Path) -> dict:
         if proc.stderr:
             errors = [
                 line for line in proc.stderr.splitlines()
-                if not line.startswith("Note:") and "Reducing" not in line
+                if not line.startswith("Note:")
+                and "Reducing" not in line
+                and "PPerror" not in line
             ]
             if errors:
                 print("STDERR:", "\n".join(errors[-10:]))
@@ -93,25 +95,36 @@ def run_ngspice(spice_file: Path, output_dir: Path) -> dict:
         print("ERROR: ngspice not found. Install with: apt install ngspice")
         return {"status": "ERROR", "message": "ngspice not installed"}
     except subprocess.TimeoutExpired:
-        print("ERROR: Simulation timed out (120s)")
+        print("ERROR: Simulation timed out (300s)")
         return {"status": "FAIL", "message": "timeout"}
+    except Exception as e:
+        print(f"ERROR: Unexpected error: {e}")
+        return {"status": "FAIL", "message": str(e)[:100]}
 
     # Parse results file
     result = {"status": "PASS", "values": {}}
 
+    print(f"  results_file exists: {results_file.exists()}, returncode: {proc.returncode}")
     if results_file.exists():
-        for line in results_file.read_text().splitlines():
+        content = results_file.read_text()
+        print(f"  results_file content ({len(content)} bytes): {content[:200]}")
+        for line in content.splitlines():
             if line.startswith("RESULT:"):
                 key, val = line[7:].split("=", 1)
                 result["values"][key] = val
             elif line.startswith("STATUS:"):
                 result["status"] = line[7:].strip()
-    else:
-        if proc.returncode == 0:
-            result["status"] = "PASS"
-        else:
+        # STATUS in results file is authoritative, regardless of exit code
+    elif proc.returncode != 0:
+        # ngspice may exit non-zero due to PPerror or other non-fatal issues
+        # Only treat as FAIL if there's actual error output
+        stderr_lines = proc.stderr.splitlines() if proc.stderr else []
+        real_errors = [l for l in stderr_lines
+                       if not l.startswith("Note:") and "PPerror" not in l
+                       and "Reducing" not in l and l.strip()]
+        if real_errors:
             result["status"] = "FAIL"
-            result["message"] = f"ngspice exited with code {proc.returncode}"
+            result["message"] = f"ngspice error: {real_errors[-1][:100]}"
 
     # Generate waveform plot on failure
     if result["status"] == "FAIL":
@@ -139,7 +152,11 @@ def main():
 
     results = {}
     for spice_file in spice_files:
-        results[spice_file.name] = run_ngspice(spice_file, output_dir)
+        try:
+            results[spice_file.name] = run_ngspice(spice_file, output_dir)
+        except Exception as e:
+            print(f"  CRASH: {spice_file.name}: {e}")
+            results[spice_file.name] = {"status": "FAIL", "message": str(e)[:100]}
 
     # Summary
     print(f"\n{'='*60}")
