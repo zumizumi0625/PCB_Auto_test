@@ -20,8 +20,11 @@
 * 3.3V supply
 VCC vcc 0 DC 3.3
 
-* Pull-up resistor (4.7k — standard value for 3.3V I2C)
-Rp vcc sda 4.7k
+* Pull-up resistor
+* 4.7k is marginal for 200pF bus (RC=940ns, tr~2us > 1us spec)
+* 2.2k gives RC=440ns, tr~970ns — just within Standard Mode spec
+* For light bus (<50pF), 4.7k is fine
+Rp vcc sda 2.2k
 
 * Bus capacitance: 200pF (typical for 4-5 devices + 20cm traces)
 Cbus sda 0 200p
