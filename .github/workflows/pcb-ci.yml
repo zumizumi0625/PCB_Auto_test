@@ -72,6 +72,13 @@ jobs:
           path: output/${{ matrix.project.name }}/
           retention-days: 30
 
+      - name: Validate DRC/ERC results
+        if: always()
+        run: |
+          python3 tools/check_drc_erc.py \
+            "output/${{ matrix.project.name }}/reports" \
+            --exclusions .drc-exclusions.json
+
   # ============================================
   # Job 2: SPICE シミュレーション
   # ============================================
@@ -160,6 +167,8 @@ jobs:
               lines.append(f"## ✅ PCB CI — All Passed")
           else:
               lines.append(f"## ❌ PCB CI — Failures Detected")
+              if kicad == "failure":
+                  lines.append("⚡ **DRC/ERCにエラー違反があります。修正してください。**")
 
           lines.append(f"Commit: `{commit_sha}` {commit_msg}")
           lines.append("")
@@ -254,10 +263,21 @@ jobs:
                       if (violations.length === 0) {
                         body += `- ✅ ${file}: No violations\n`;
                       } else {
-                        body += `- ❌ ${file}: ${violations.length} violation(s)\n`;
-                        for (const v of violations.slice(0, 5)) {
-                          body += `  - ${v.type || v.severity}: ${v.description || JSON.stringify(v).slice(0, 100)}\n`;
+                        const errors = violations.filter(v => (v.severity || 'error').toLowerCase() !== 'warning');
+                        const warnings = violations.filter(v => (v.severity || 'error').toLowerCase() === 'warning');
+                        if (errors.length > 0) {
+                          body += `- ❌ ${file}: ${errors.length} error(s), ${warnings.length} warning(s)\n`;
+                        } else {
+                          body += `- ⚠️ ${file}: ${warnings.length} warning(s) only\n`;
                         }
+                        for (const v of errors.slice(0, 5)) {
+                          body += `  - 🔴 \`${v.type || 'error'}\`: ${v.description || JSON.stringify(v).slice(0, 100)}\n`;
+                        }
+                        for (const v of warnings.slice(0, 3)) {
+                          body += `  - 🟡 \`${v.type || 'warning'}\`: ${v.description || JSON.stringify(v).slice(0, 100)}\n`;
+                        }
+                        if (errors.length > 5) body += `  - ... and ${errors.length - 5} more error(s)\n`;
+                        if (warnings.length > 3) body += `  - ... and ${warnings.length - 3} more warning(s)\n`;
                       }
                     } catch (e) {
                       body += `- ⚠️ ${file}: Could not parse report\n`;

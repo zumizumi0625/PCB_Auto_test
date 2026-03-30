@@ -1,0 +1,13 @@
+{
+  "_comment": [
+    "DRC/ERC 除外設定",
+    "excluded_types: 違反タイプ名で除外（完全一致）",
+    "excluded_descriptions: 違反の説明文で除外（正規表現）",
+    "",
+    "例: 意図的に未接続のピンがある場合",
+    "  KiCad上で No Connect (×) フラグを付けるのが推奨。",
+    "  それでも除外が必要な場合は excluded_descriptions に追加。"
+  ],
+  "excluded_types": [],
+  "excluded_descriptions": []
+}
