@@ -211,9 +211,9 @@ def main():
 
     report_dir = Path(args.report_dir)
     if not report_dir.exists():
-        print(f"Warning: Report directory not found: {report_dir}")
-        print("DRC/ERC reports may not have been generated.")
-        sys.exit(0)
+        print(f"ERROR: Report directory not found: {report_dir}")
+        print("DRC/ERC reports were not generated. Check the kicad-cli steps in CI.")
+        sys.exit(1)
 
     # 除外設定を読み込む
     exclusions = load_exclusions(args.exclusions)
@@ -221,8 +221,9 @@ def main():
     # JSON レポートを検索
     report_files = sorted(report_dir.glob("*_report.json"))
     if not report_files:
-        print(f"Warning: No report files found in {report_dir}")
-        sys.exit(0)
+        print(f"ERROR: No report files found in {report_dir}")
+        print("DRC/ERC reports were not generated. Check the kicad-cli steps in CI.")
+        sys.exit(1)
 
     # 全レポートを解析
     all_results = []

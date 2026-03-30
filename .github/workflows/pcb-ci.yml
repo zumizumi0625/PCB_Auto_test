@@ -34,7 +34,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Run KiBot (DRC + ERC + Outputs)
+      - name: Run KiBot (Outputs)
         uses: INTI-CMNB/KiBot@v2_k8
         with:
           config: .kibot.yml
@@ -44,24 +44,30 @@ jobs:
           skip: run_erc,run_drc
         continue-on-error: true
 
-      - name: Run DRC
-        uses: INTI-CMNB/KiBot@v2_k8
+      - name: Run DRC (JSON report)
+        uses: docker://ghcr.io/inti-cmnb/kicad_auto:ki8
         with:
-          config: .kibot.yml
-          board: ${{ matrix.project.board }}
-          schema: ${{ matrix.project.schema }}
-          dir: output/${{ matrix.project.name }}
-          targets: drc_report
+          entrypoint: /bin/bash
+          args: >-
+            -c "mkdir -p output/${{ matrix.project.name }}/reports &&
+            kicad-cli pcb drc
+            --output output/${{ matrix.project.name }}/reports/drc_report.json
+            --format json
+            --severity-all
+            ${{ matrix.project.board }} || true"
         continue-on-error: true
 
-      - name: Run ERC
-        uses: INTI-CMNB/KiBot@v2_k8
+      - name: Run ERC (JSON report)
+        uses: docker://ghcr.io/inti-cmnb/kicad_auto:ki8
         with:
-          config: .kibot.yml
-          board: ${{ matrix.project.board }}
-          schema: ${{ matrix.project.schema }}
-          dir: output/${{ matrix.project.name }}
-          targets: erc_report
+          entrypoint: /bin/bash
+          args: >-
+            -c "mkdir -p output/${{ matrix.project.name }}/reports &&
+            kicad-cli sch erc
+            --output output/${{ matrix.project.name }}/reports/erc_report.json
+            --format json
+            --severity-all
+            ${{ matrix.project.schema }} || true"
         continue-on-error: true
 
       - name: Upload artifacts

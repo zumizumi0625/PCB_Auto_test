@@ -89,18 +89,8 @@ outputs:
       format: CSV
 
   # ============================================
-  # DRC/ERC レポート (JSON)
+  # DRC/ERC レポート
   # ============================================
-  - name: drc_report
-    comment: "DRC report"
-    type: drc
-    dir: output/reports
-    options:
-      output: "drc_report.json"
-
-  - name: erc_report
-    comment: "ERC report"
-    type: erc
-    dir: output/reports
-    options:
-      output: "erc_report.json"
+  # NOTE: DRC/ERC JSON レポートは kicad-cli で直接生成する。
+  # KiBot の outputs には drc/erc タイプが存在しないため。
+  # → pcb-ci.yml の "Run DRC" / "Run ERC" ステップを参照。
