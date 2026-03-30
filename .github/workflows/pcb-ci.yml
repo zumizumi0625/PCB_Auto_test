@@ -1,5 +1,13 @@
 name: PCB Design CI
 
+# ============================================
+# KiCad バージョン設定
+# 変更時は KICAD_IMAGE_TAG と KiBot の uses タグ (v2_kX) を両方更新すること
+# 例: KiCad 9 → KICAD_IMAGE_TAG: ki9, uses: INTI-CMNB/KiBot@v2_k9
+# ============================================
+env:
+  KICAD_IMAGE_TAG: ki8
+
 on:
   push:
     branches: [main]
@@ -35,7 +43,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Run KiBot (Outputs)
-        uses: INTI-CMNB/KiBot@v2_k8
+        uses: INTI-CMNB/KiBot@v2_k8  # ← KICAD_IMAGE_TAG に合わせて変更
         with:
           config: .kibot.yml
           board: ${{ matrix.project.board }}
@@ -45,29 +53,27 @@ jobs:
         continue-on-error: true
 
       - name: Run DRC (JSON report)
-        uses: docker://ghcr.io/inti-cmnb/kicad_auto:ki8
-        with:
-          entrypoint: /bin/bash
-          args: >-
-            -c "mkdir -p output/${{ matrix.project.name }}/reports &&
-            kicad-cli pcb drc
-            --output output/${{ matrix.project.name }}/reports/drc_report.json
-            --format json
-            --severity-all
-            ${{ matrix.project.board }} || true"
+        run: |
+          mkdir -p output/${{ matrix.project.name }}/reports
+          docker run --rm -v "$PWD":/workdir -w /workdir \
+            ghcr.io/inti-cmnb/kicad_auto:${{ env.KICAD_IMAGE_TAG }} \
+            kicad-cli pcb drc \
+              --output output/${{ matrix.project.name }}/reports/drc_report.json \
+              --format json \
+              --severity-all \
+              ${{ matrix.project.board }} || true
         continue-on-error: true
 
       - name: Run ERC (JSON report)
-        uses: docker://ghcr.io/inti-cmnb/kicad_auto:ki8
-        with:
-          entrypoint: /bin/bash
-          args: >-
-            -c "mkdir -p output/${{ matrix.project.name }}/reports &&
-            kicad-cli sch erc
-            --output output/${{ matrix.project.name }}/reports/erc_report.json
-            --format json
-            --severity-all
-            ${{ matrix.project.schema }} || true"
+        run: |
+          mkdir -p output/${{ matrix.project.name }}/reports
+          docker run --rm -v "$PWD":/workdir -w /workdir \
+            ghcr.io/inti-cmnb/kicad_auto:${{ env.KICAD_IMAGE_TAG }} \
+            kicad-cli sch erc \
+              --output output/${{ matrix.project.name }}/reports/erc_report.json \
+              --format json \
+              --severity-all \
+              ${{ matrix.project.schema }} || true
         continue-on-error: true
 
       - name: Upload artifacts
